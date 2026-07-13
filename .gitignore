@@ -1,0 +1,35 @@
+/target/
+**/*.rs.bk
+.idea/
+.vscode/
+*.lsp.gz
+
+# Android / Gradle
+agent/.gradle/
+agent/**/build/
+agent/local.properties
+agent/.cxx/
+*.apk
+*.aab
+*.dex
+
+# Local JDK override (set per machine)
+# agent/gradle.properties may contain org.gradle.java.home — keep commented in repo
+
+# Reference clones (re-fetch via references/INTEGRATION.md)
+references/*/
+!references/INTEGRATION.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Secrets
+.env
+*.keystore
+*.jks
+
+# Local debug / RPC scratch
+tmp_*.json

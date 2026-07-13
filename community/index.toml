@@ -1,0 +1,37 @@
+# Community catalog index (local bundle; remote git repo planned)
+
+[[profiles]]
+id = "hyper-perf-pack"
+path = "profiles/xiaomi/hyper-perf-pack.mspec.toml"
+oem = ["xiaomi"]
+tags = ["performance", "fps", "joyose"]
+
+[[profiles]]
+id = "oneplus-notification-pack"
+path = "profiles/oneplus/notification-pack.mspec.toml"
+oem = ["oneplus"]
+tags = ["notification", "systemui"]
+
+[[rules]]
+id = "xiaomi/joyose/block-cloud-fetch"
+ref = "rules/xiaomi/joyose/block-cloud-fetch.rule.toml"
+
+[[rules]]
+id = "universal/system/skip-kill-background"
+ref = "rules/universal/system/skip-kill-background.rule.toml"
+
+# Reference modules (not shipped — user installs separately)
+[[references.modules]]
+package = "com.rdstory.miuiperfsaver"
+name = "MIUI 性能救星"
+url = "https://github.com/rdtoy/MIUIPerfSaver"
+
+[[references.modules]]
+package = "com.hchen.appretention"
+name = "AppRetentionHook"
+url = "https://github.com/HChenX/AppRetention"
+
+[[references.modules]]
+package = "io.github.kvmy666.autoexpand"
+name = "AutoExpandNotifications"
+url = "https://github.com/kvmy666/-AutoExpandNotifications"

@@ -1,0 +1,33 @@
+mspec_version = "1"
+
+[meta]
+id = "smoke-hook"
+name = "Hook 冒烟测试"
+description = "验证 modspec-agent rule_ref 能注入 joyose 并写 LSPosed 日志"
+author = "modspec-community"
+version = "1.0.0"
+tags = ["test", "xiaomi", "joyose"]
+
+[device]
+oem = "xiaomi"
+min_android = 33
+
+[[mods]]
+id = "smoke-joyose"
+type = "rule_ref"
+enabled = true
+rule = "test/smoke-joyose"
+
+[[mods]]
+id = "reload-joyose"
+type = "reload"
+enabled = true
+depends_on = ["smoke-joyose"]
+packages = ["com.xiaomi.joyose"]
+
+[verify]
+[[verify.checks]]
+mod_id = "smoke-joyose"
+source = "lsposed_log"
+pattern = "smoke-joyose.*hooked"
+expect = "hooked"

@@ -1,0 +1,24 @@
+[package]
+name = "modspec-cli"
+description = "CLI for ModSpec — LSPosed profile and rule orchestration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "modspec"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+modspec-core.workspace = true
+modspec-protocol.workspace = true
+modspec-mcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

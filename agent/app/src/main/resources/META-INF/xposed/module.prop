@@ -1,0 +1,11 @@
+id=com.modspec.agent
+name=ModSpec Agent
+version=v0.1.0
+versionCode=1
+author=modspec
+description=LSPosed profile/rule orchestration agent. Declarative .mspec.toml profiles and .rule.toml hooks via libxposed API 102.
+minApiVersion=101
+targetApiVersion=102
+staticScope=false
+exceptionMode=protective
+autoHotReload=true

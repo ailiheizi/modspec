@@ -1,0 +1,26 @@
+rule_version = "1"
+
+[meta]
+id = "universal/system/skip-kill-background"
+name = "拦截 killBackgroundProcesses（system）"
+description = "通用后台保活思路，参考 AppRetentionHook / Don't Kill。"
+author = "modspec-community"
+tags = ["background", "keepalive", "universal"]
+min_android = 30
+
+[compatible]
+packages = ["system"]
+scope_required = ["system"]
+
+[[hooks]]
+phase = "on_system_server_starting"
+target = { resolver = "static", class = "com.android.server.am.ActivityManagerService", method = "killBackgroundProcesses", signature = "(Ljava/lang/String;I)V" }
+action = { kind = "skip" }
+
+  [hooks.options]
+  priority = 0
+  exception_mode = "protective"
+
+[verify]
+log_success = "skip-kill-background.*hooked"
+log_failure = "Hook Failed"

@@ -1,0 +1,36 @@
+rule_version = "1"
+
+[meta]
+id = "xiaomi/joyose/block-cloud-fetch"
+name = "阻止 Joyose 拉取云控"
+description = "拦截 Joyose 云控拉取逻辑。DexKit 分支参考 HyperCeiler CustomRefreshRate 失败模式 (NonUniqueResultException)。"
+author = "modspec-community"
+tags = ["xiaomi", "joyose", "cloud", "performance"]
+min_android = 33
+
+[compatible]
+packages = ["com.xiaomi.joyose"]
+oem = ["xiaomi"]
+rom = ["hyperos", "miui"]
+
+[[variants]]
+name = "hyperos2-android14"
+when = { android = "34" }
+
+  [[variants.hooks]]
+  phase = "on_package_loaded"
+  target = { resolver = "dexkit", query = { class = "CloudController", method = "fetchRules", unique = true } }
+  action = { kind = "return_const", value = { type = "void" } }
+
+[[variants]]
+name = "hyperos3-android15"
+when = { android = "35" }
+
+  [[variants.hooks]]
+  phase = "on_package_loaded"
+  target = { resolver = "dexkit", query = { class = "CloudController", method = "fetchRules", unique = true } }
+  action = { kind = "return_const", value = { type = "void" } }
+
+[verify]
+log_success = "block-cloud-fetch.*hooked"
+log_failure = "NonUniqueResultException|ClassNotFoundException|Hook Failed"

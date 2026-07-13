@@ -1,0 +1,80 @@
+mspec_version = "1"
+
+[meta]
+id = "hyper-perf-pack"
+name = "Hyper 性能解锁包"
+description = "编排 MIUI 性能救星 + Joyose 云控拦截规则（参考 MIUIPerfSaver / HyperCeiler issues）"
+author = "modspec-community"
+version = "1.0.0"
+tags = ["xiaomi", "hyperos", "performance", "fps"]
+
+[meta.requires]
+oem = ["xiaomi"]
+rom = ["hyperos", "miui"]
+min_android = 33
+lsposed = ">=1.9"
+
+[device]
+oem = "xiaomi"
+rom = "hyperos"
+min_android = 33
+
+# 第三方模块：只编排 scope/开关，Hook 由模块自身实现
+[[mods]]
+id = "perf-saver"
+type = "module_ref"
+enabled = true
+package = "com.rdstory.miuiperfsaver"
+scope = ["com.miui.powerkeeper", "com.xiaomi.joyose"]
+note = "MIUI 性能救星 — 参考 rdtoy/MIUIPerfSaver"
+
+[[mods]]
+id = "perf-saver-prefs"
+type = "module_prefs"
+enabled = true
+module = "com.rdstory.miuiperfsaver"
+prefs = { joyose_rule = "modify_fps_999" }
+
+# modspec-agent 内置规则库 Hook
+[[mods]]
+id = "block-joyose-tracking"
+type = "rule_ref"
+enabled = true
+rule = "xiaomi/joyose/block-tracking"
+scope = ["com.xiaomi.joyose"]
+
+[[mods]]
+id = "reload-targets"
+type = "reload"
+enabled = true
+depends_on = ["perf-saver", "block-joyose-tracking"]
+packages = ["com.xiaomi.joyose", "com.miui.powerkeeper"]
+mode = "force_stop"
+
+[[mods]]
+id = "clear-joyose"
+type = "post_action"
+enabled = true
+depends_on = ["perf-saver-prefs"]
+commands = [
+    "am force-stop com.xiaomi.joyose",
+    "pm clear com.xiaomi.joyose",
+]
+
+[reapply]
+on_boot = true
+on_lsposed_reload = true
+on_rule_change = true
+
+[verify]
+[[verify.checks]]
+mod_id = "block-joyose-tracking"
+source = "lsposed_log"
+pattern = "block-tracking.*hooked|Hook Failed"
+expect = "hooked"
+
+[[verify.checks]]
+mod_id = "perf-saver"
+source = "scope"
+module = "com.rdstory.miuiperfsaver"
+expect_apps = ["com.xiaomi.joyose", "com.miui.powerkeeper"]

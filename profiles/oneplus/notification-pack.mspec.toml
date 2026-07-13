@@ -1,0 +1,44 @@
+mspec_version = "1"
+
+[meta]
+id = "oneplus-notification-pack"
+name = "一加通知增强包"
+description = "编排 AutoExpandNotifications + 通用后台规则（参考 kvmy666/-AutoExpandNotifications）"
+author = "modspec-community"
+version = "1.0.0"
+tags = ["oneplus", "oxygenos", "notification"]
+
+[meta.requires]
+oem = ["oneplus"]
+rom = ["oxygenos", "coloros"]
+min_android = 35
+
+[[mods]]
+id = "auto-expand"
+type = "module_ref"
+enabled = true
+package = "io.github.kvmy666.autoexpand"
+scope = [
+    "android",
+    "com.android.systemui",
+    "com.google.android.inputmethod.latin",
+]
+
+[[mods]]
+id = "background-keep"
+type = "module_ref"
+enabled = true
+package = "com.hchen.appretention"
+scope = ["system"]
+note = "AppRetentionHook — ColorOS/OneUI 仅 system scope"
+
+[[mods]]
+id = "reload-systemui"
+type = "reload"
+enabled = true
+depends_on = ["auto-expand"]
+packages = ["com.android.systemui"]
+mode = "force_stop"
+
+[reapply]
+on_boot = true
