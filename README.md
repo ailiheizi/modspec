@@ -38,12 +38,22 @@ agent/                LSPosed 模块 APK（Kotlin）
 profiles/             示例 profile
 rules/                通用 Hook 规则库
 community/            社区索引
-docs/                 协议、参考、实现清单
+docs/                 协议、路线图、联调手册
 ```
+
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [docs/ROADMAP.md](docs/ROADMAP.md) | **未来规划**：阶段目标、公开发布门槛、版本命名 |
+| [docs/CONTINUE.md](docs/CONTINUE.md) | **如何继续**：smoke-hook 联调、开发顺序、文件速查 |
+| [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) | 组件完成度清单 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献与环境要求 |
+| [docs/protocol.md](docs/protocol.md) | JSON-RPC 协议 |
 
 ## Agent（LSPosed 模块）
 
-见 [agent/README.md](agent/README.md) 与 [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)。
+见 [agent/README.md](agent/README.md)、[docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) 与 [docs/CONTINUE.md](docs/CONTINUE.md)。
 
 - libxposed API **102**，`RuleEngine`（static + DexKit）+ `AppProfileApplier`
 - `LsposedCli` → `/data/adb/lspd/bin/cli`
@@ -65,4 +75,5 @@ docs/                 协议、参考、实现清单
 | 5 | MCP server (`modspec mcp serve`) | ✅ |
 | 6 | 端到端 Hook 冒烟（真机 joyose 等） | 🚧 联调中 |
 
-> 当前适合开发者预览与自测，**尚未**作为稳定发行版推荐普通用户安装。
+> 当前适合开发者预览与自测，**尚未**作为稳定发行版推荐普通用户安装。  
+> 下一步做什么 → [docs/CONTINUE.md](docs/CONTINUE.md) · 长期规划 → [docs/ROADMAP.md](docs/ROADMAP.md)
