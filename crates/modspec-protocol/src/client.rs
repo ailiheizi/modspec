@@ -1,12 +1,25 @@
 //! JSON-RPC client — HTTP (primary) and WebSocket transports.
 
+use std::time::Duration;
+
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use thiserror::Error;
 
 use crate::{
-    ApplyProfileParams, ApplyProfileResponse, DeviceStatus, JsonRpcRequest, JsonRpcResponse,
-    PingResponse, methods, transport::{self, TransportKind},
+    methods,
+    transport::{self, TransportKind},
+    AppInfoParams, AppInfoResponse, AppListParams, AppListResponse, ApplyProfileParams,
+    ApplyProfileResponse, CollectLogsParams, CollectLogsResponse, DeployRuleParams,
+    DeployRuleResponse, DeviceInspection, DeviceStatus, GetLogsParams, GetLogsResponse,
+    InspectDeviceParams, InstallFridaGadgetParams, InstallFridaGadgetResponse, JsonRpcRequest,
+    JsonRpcResponse, ModuleDiagnostics, PingResponse, ProcessListParams, ProcessListResponse,
+    ReapplyParams, ReapplyResponse, RestartTargetsParams,
+    RestartTargetsResponse, ScriptDeployParams, ScriptDeployResponse, ScriptDisableParams,
+    ScriptDisableResponse, ScriptEnableParams, ScriptEnableResponse, ScriptListParams,
+    ScriptListResponse, ScriptReloadParams, ScriptReloadResponse, ScriptRemoveParams,
+    ScriptRemoveResponse, ScriptValidateParams, ScriptValidateResponse, SoftRestartParams,
+    SoftRestartResponse, TriggerAppParams, TriggerAppResponse, VerifyParams, VerifyResponse,
 };
 
 #[derive(Debug, Error)]
@@ -19,6 +32,9 @@ pub enum RpcClientError {
 
     #[error("rpc error {code}: {message}")]
     Rpc { code: i32, message: String },
+
+    #[error("unauthorized: {message} — re-pair with `modspec pair scan`")]
+    Unauthorized { message: String },
 
     #[error("transport: {0}")]
     Transport(String),
@@ -36,6 +52,7 @@ pub struct RpcClient {
     transport: TransportKind,
     connected: bool,
     offline: bool,
+    auth_token: Option<String>,
 }
 
 impl RpcClient {
@@ -46,6 +63,7 @@ impl RpcClient {
             transport: TransportKind::Http,
             connected: false,
             offline: false,
+            auth_token: None,
         }
     }
 
@@ -61,11 +79,17 @@ impl RpcClient {
             transport: TransportKind::Http,
             connected: false,
             offline: false,
+            auth_token: None,
         }
     }
 
     pub fn with_transport(mut self, transport: TransportKind) -> Self {
         self.transport = transport;
+        self
+    }
+
+    pub fn with_auth_token(mut self, auth_token: Option<String>) -> Self {
+        self.auth_token = auth_token;
         self
     }
 
@@ -82,6 +106,10 @@ impl RpcClient {
             TransportKind::Http => &self.http_url,
             TransportKind::WebSocket => &self.ws_url,
         }
+    }
+
+    pub fn auth_token(&self) -> Option<&str> {
+        self.auth_token.as_deref()
     }
 
     pub fn set_offline(&mut self, offline: bool) {
@@ -111,8 +139,19 @@ impl RpcClient {
         self.call(methods::PING, Value::Null).await
     }
 
+    /// Authorized ping with a short, explicit timeout (connection-manager probe).
+    pub async fn ping_with_timeout(&self, timeout: Duration) -> Result<PingResponse> {
+        self.call_with_timeout(methods::PING, Value::Null, timeout)
+            .await
+    }
+
     pub async fn get_status(&self) -> Result<DeviceStatus> {
         self.call(methods::GET_STATUS, Value::Null).await
+    }
+
+    pub async fn inspect_device(&self, params: &InspectDeviceParams) -> Result<DeviceInspection> {
+        self.call(methods::INSPECT_DEVICE, serde_json::to_value(params)?)
+            .await
     }
 
     pub async fn apply_profile(&self, params: &ApplyProfileParams) -> Result<ApplyProfileResponse> {
@@ -120,11 +159,133 @@ impl RpcClient {
         self.call(methods::APPLY_PROFILE, params).await
     }
 
+    pub async fn deploy_rule(&self, params: &DeployRuleParams) -> Result<DeployRuleResponse> {
+        self.call(methods::DEPLOY_RULE, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn restart_targets(
+        &self,
+        params: &RestartTargetsParams,
+    ) -> Result<RestartTargetsResponse> {
+        self.call(methods::RESTART_TARGETS, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn collect_logs(&self, params: &CollectLogsParams) -> Result<CollectLogsResponse> {
+        self.call(methods::COLLECT_LOGS, serde_json::to_value(params)?)
+            .await
+    }
+
+    /// Agent-side drift report for a profile (read-only).
+    pub async fn verify(&self, params: &VerifyParams) -> Result<VerifyResponse> {
+        self.call(methods::VERIFY, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn reapply(&self, params: &ReapplyParams) -> Result<ReapplyResponse> {
+        self.call(methods::REAPPLY, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn soft_restart(&self, params: &SoftRestartParams) -> Result<SoftRestartResponse> {
+        self.call(methods::SOFT_RESTART, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn app_list(&self, params: &AppListParams) -> Result<AppListResponse> {
+        self.call(methods::APP_LIST, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn app_info(&self, params: &AppInfoParams) -> Result<AppInfoResponse> {
+        self.call(methods::APP_INFO, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn process_list(&self, params: &ProcessListParams) -> Result<ProcessListResponse> {
+        self.call(methods::PROCESS_LIST, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn trigger_app(&self, params: &TriggerAppParams) -> Result<TriggerAppResponse> {
+        self.call(methods::TRIGGER_APP, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn get_logs(&self, params: &GetLogsParams) -> Result<GetLogsResponse> {
+        self.call(methods::GET_LOGS, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn module_diagnostics(&self) -> Result<ModuleDiagnostics> {
+        self.call(methods::MODULE_DIAGNOSTICS, Value::Null).await
+    }
+
+    pub async fn script_validate(
+        &self,
+        params: &ScriptValidateParams,
+    ) -> Result<ScriptValidateResponse> {
+        self.call(methods::SCRIPT_VALIDATE, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn script_deploy(&self, params: &ScriptDeployParams) -> Result<ScriptDeployResponse> {
+        self.call(methods::SCRIPT_DEPLOY, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn script_list(&self, params: &ScriptListParams) -> Result<ScriptListResponse> {
+        self.call(methods::SCRIPT_LIST, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn script_enable(&self, params: &ScriptEnableParams) -> Result<ScriptEnableResponse> {
+        self.call(methods::SCRIPT_ENABLE, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn script_disable(
+        &self,
+        params: &ScriptDisableParams,
+    ) -> Result<ScriptDisableResponse> {
+        self.call(methods::SCRIPT_DISABLE, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn script_remove(&self, params: &ScriptRemoveParams) -> Result<ScriptRemoveResponse> {
+        self.call(methods::SCRIPT_REMOVE, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn script_reload(&self, params: &ScriptReloadParams) -> Result<ScriptReloadResponse> {
+        self.call(methods::SCRIPT_RELOAD, serde_json::to_value(params)?)
+            .await
+    }
+
+    pub async fn install_frida_gadget(
+        &self,
+        params: &InstallFridaGadgetParams,
+    ) -> Result<InstallFridaGadgetResponse> {
+        self.call(methods::INSTALL_FRIDA_GADGET, serde_json::to_value(params)?)
+            .await
+    }
+
     pub fn build_request(&self, method: &str, params: Value) -> JsonRpcRequest {
         JsonRpcRequest::new(method, params)
     }
 
     async fn call<T: DeserializeOwned>(&self, method: &str, params: Value) -> Result<T> {
+        self.call_with_timeout(method, params, crate::transport::DEFAULT_RPC_TIMEOUT)
+            .await
+    }
+
+    async fn call_with_timeout<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<T> {
         if self.offline {
             return Err(RpcClientError::Offline {
                 method: method.into(),
@@ -138,8 +299,19 @@ impl RpcClient {
 
         let request = self.build_request(method, params);
         let result = match self.transport {
-            TransportKind::Http => transport::call_http(&self.http_url, &request).await?,
-            TransportKind::WebSocket => transport::call_websocket(&self.ws_url, &request).await?,
+            TransportKind::Http => {
+                transport::call_http_with_timeout(
+                    &self.http_url,
+                    self.auth_token.as_deref(),
+                    &request,
+                    timeout,
+                )
+                .await?
+            }
+            TransportKind::WebSocket => {
+                transport::call_websocket(&self.ws_url, self.auth_token.as_deref(), &request)
+                    .await?
+            }
         };
         Ok(serde_json::from_value(result)?)
     }
@@ -205,14 +377,13 @@ mod tests {
 
     #[test]
     fn apply_request_serializes() {
-        let profile = Profile::from_str(
-            r#"
+        let profile: Profile = r#"
 mspec_version = "1"
 [meta]
 id = "test"
 name = "Test"
-"#,
-        )
+"#
+        .parse()
         .unwrap();
         let params = ApplyProfileParams {
             profile,

@@ -10,6 +10,9 @@ pub enum ModspecError {
     #[error("unsupported rule_version: {0}")]
     UnsupportedRuleVersion(String),
 
+    #[error("unsupported script_version: {0}")]
+    UnsupportedScriptVersion(String),
+
     #[error("duplicate mod id: {0}")]
     DuplicateModId(String),
 

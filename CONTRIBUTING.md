@@ -53,4 +53,4 @@ cd agent && .\gradlew.bat :app:assembleDebug   # 改了 agent 时必跑
 
 ## 许可
 
-MIT — 见 [LICENSE](../LICENSE)。
+AGPL-3.0-or-later — 见 [LICENSE](../LICENSE) 与 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)（含 Rhino/LuaJ 等第三方组件与参考项目的许可证说明；贡献即同意项目许可证条款）。

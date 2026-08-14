@@ -259,17 +259,21 @@ fn default_true() -> bool {
 }
 
 impl Profile {
-    pub fn from_str(content: &str) -> Result<Self> {
-        Ok(toml::from_str(content)?)
-    }
-
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        Self::from_str(&content)
+        content.parse()
     }
 
     pub fn mod_ids(&self) -> Vec<&str> {
         self.mods.iter().map(|m| m.id()).collect()
+    }
+}
+
+impl std::str::FromStr for Profile {
+    type Err = crate::error::ModspecError;
+
+    fn from_str(content: &str) -> Result<Self> {
+        Ok(toml::from_str(content)?)
     }
 }
 
@@ -316,7 +320,7 @@ mod tests {
     #[test]
     fn parse_example_profile() {
         let content = include_str!("../../../profiles/xiaomi/hyper-perf-pack.mspec.toml");
-        let profile = Profile::from_str(content).expect("parse profile");
+        let profile: Profile = content.parse().expect("parse profile");
         assert_eq!(profile.meta.id, "hyper-perf-pack");
         assert!(profile.mods.len() >= 3);
     }

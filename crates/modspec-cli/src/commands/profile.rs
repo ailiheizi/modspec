@@ -2,11 +2,10 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use modspec_core::{
-    DeviceStore, ModEntry, Profile, ProfileState, validate_profile,
-};
-use modspec_protocol::{methods, ApplyProfileParams, RpcClient};
+use modspec_core::{validate_profile, DeviceStore, ModEntry, Profile, ProfileState, VerifySource};
+use modspec_protocol::{methods, ApplyProfileParams, CollectLogsParams, VerifyParams};
 
+use crate::commands::connect_device;
 use crate::ProfileAction;
 
 pub async fn run(action: ProfileAction) -> Result<()> {
@@ -15,23 +14,52 @@ pub async fn run(action: ProfileAction) -> Result<()> {
         ProfileAction::Apply {
             path,
             device,
+            serial,
             dry_run,
             offline,
-        } => profile_apply(&path, device.as_deref(), dry_run, offline).await,
+        } => {
+            profile_apply(
+                &path,
+                device.as_deref(),
+                serial.as_deref(),
+                dry_run,
+                offline,
+            )
+            .await
+        }
         ProfileAction::Diff { path, device } => profile_diff(&path, device.as_deref()),
+        ProfileAction::Verify {
+            path,
+            device,
+            serial,
+            no_bootstrap,
+        } => {
+            profile_verify(
+                &path,
+                device.as_deref(),
+                serial.as_deref(),
+                no_bootstrap,
+            )
+            .await
+        }
     }
 }
 
 fn validate_profile_file(path: &str) -> Result<()> {
     let profile = Profile::from_file(path).with_context(|| format!("read profile {path}"))?;
     validate_profile(&profile)?;
-    println!("OK profile {} ({} mods)", profile.meta.id, profile.mods.len());
+    println!(
+        "OK profile {} ({} mods)",
+        profile.meta.id,
+        profile.mods.len()
+    );
     Ok(())
 }
 
 async fn profile_apply(
     path: &str,
     device_id: Option<&str>,
+    serial: Option<&str>,
     dry_run: bool,
     offline: bool,
 ) -> Result<()> {
@@ -47,15 +75,20 @@ async fn profile_apply(
         dry_run,
         only: vec![],
     };
-
-    let mut client = RpcClient::from_device(&device.host, device.http_port, device.ws_port);
-    client.set_offline(offline);
+    if !dry_run {
+        // Applying a profile mutates device state — require an active pairing token.
+        device.require_auth()?;
+    }
 
     if offline || dry_run {
-        let req = client.build_request(
-            methods::APPLY_PROFILE,
-            serde_json::to_value(&params)?,
-        );
+        let mut client = modspec_protocol::RpcClient::from_device(
+            &device.host,
+            device.http_port,
+            device.ws_port,
+        )
+        .with_auth_token(device.auth_token.clone());
+        client.set_offline(offline);
+        let req = client.build_request(methods::APPLY_PROFILE, serde_json::to_value(&params)?);
         let label = if dry_run { "dry-run" } else { "offline" };
         println!("{label}: would send RPC to {}", client.http_url());
         println!("{}", serde_json::to_string_pretty(&req)?);
@@ -65,22 +98,177 @@ async fn profile_apply(
         return Ok(());
     }
 
-    client
-        .connect()
-        .await
-        .with_context(|| format!("connect to {}", device.host))?;
+    // Preflight + repair before a mutating apply. Bootstrap is intentionally
+    // NOT automatic here: an apply must not silently relaunch the Agent app.
+    let (client, status) = connect_device(
+        device,
+        serial.map(str::to_string),
+        false,
+        std::time::Duration::from_secs(3),
+        2,
+    )
+    .await?;
+    if !status.is_healthy() {
+        anyhow::bail!(
+            "connection failed (issue={}): {}",
+            status.issue.as_str(),
+            status.detail
+        );
+    }
+
     match client.apply_profile(&params).await {
         Ok(resp) => {
             println!("apply started: job_id={}", resp.job_id);
             save_known_state(&device.id, &profile)?;
         }
         Err(e) => {
-            anyhow::bail!(
-                "apply failed on {} ({}): {e}",
-                device.id,
-                device.host
-            );
+            anyhow::bail!("apply failed on {} ({}): {e}", device.id, device.host);
         }
+    }
+    Ok(())
+}
+
+async fn profile_verify(
+    path: &str,
+    device_id: Option<&str>,
+    serial: Option<&str>,
+    no_bootstrap: bool,
+) -> Result<()> {
+    let profile = Profile::from_file(path).with_context(|| format!("read profile {path}"))?;
+    validate_profile(&profile)?;
+
+    let store = DeviceStore::default();
+    let config = store.load()?;
+    let device = DeviceStore::resolve_device(&config, device_id)?;
+    device.require_auth()?;
+
+    // Preflight + repair (and optional Agent bootstrap) before the read-only
+    // verify, so a stale adb forward cannot hang the RPC below.
+    let (client, status) = connect_device(
+        device,
+        serial.map(str::to_string),
+        !no_bootstrap,
+        std::time::Duration::from_secs(3),
+        2,
+    )
+    .await?;
+    if !status.is_healthy() {
+        anyhow::bail!(
+            "connection failed (issue={}): {}",
+            status.issue.as_str(),
+            status.detail
+        );
+    }
+
+    let mut ok = 0_u32;
+    let mut failed = 0_u32;
+    let mut skipped = 0_u32;
+
+    // 1. Agent-side drift report.
+    let drift = client
+        .verify(&VerifyParams {
+            profile_id: Some(profile.meta.id.clone()),
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("verify failed on {} ({}): {e}", device.id, device.host))?
+        .drift;
+    for item in &drift {
+        println!(
+            "verify drift mod_id={} kind={} expected={} actual={} reason={}",
+            item.mod_id.as_deref().unwrap_or("-"),
+            item.kind.as_deref().unwrap_or("-"),
+            item.expected.as_deref().unwrap_or("-"),
+            item.actual.as_deref().unwrap_or("-"),
+            item.reason.as_deref().unwrap_or("-"),
+        );
+        failed += 1;
+    }
+
+    // 2. Read-only diagnostics checks against the local profile expectations.
+    let diagnostics = client.module_diagnostics().await?;
+    if let Some(generation) = diagnostics.rules_generation {
+        println!("verify info rules_generation={generation}");
+        ok += 1;
+    }
+    let scope: HashSet<&str> = diagnostics.scope.iter().map(String::as_str).collect();
+    let active_rules: HashSet<&str> = diagnostics
+        .active_rules
+        .iter()
+        .map(String::as_str)
+        .collect();
+    for m in &profile.mods {
+        if !m.enabled() {
+            continue;
+        }
+        match m {
+            ModEntry::Scope { id, apps, .. } => {
+                let missing: Vec<&str> = apps
+                    .iter()
+                    .filter(|app| !scope.contains(app.as_str()))
+                    .map(String::as_str)
+                    .collect();
+                if missing.is_empty() {
+                    println!("verify ok scope {id}");
+                    ok += 1;
+                } else {
+                    println!("verify failed scope {id} missing={}", missing.join(","));
+                    failed += 1;
+                }
+            }
+            ModEntry::RuleRef { id, rule, .. } => {
+                if active_rules.contains(rule.as_str()) {
+                    println!("verify ok rule {id}");
+                    ok += 1;
+                } else {
+                    println!("verify failed rule {id} missing={rule}");
+                    failed += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 3. `[verify]` section: lsposed_log pattern checks against the hook journal.
+    if let Some(config) = &profile.verify {
+        for check in &config.checks {
+            if check.source != VerifySource::LsposedLog {
+                skipped += 1;
+                continue;
+            }
+            let Some(pattern) = check.pattern.as_deref() else {
+                skipped += 1;
+                continue;
+            };
+            let logs = client
+                .collect_logs(&CollectLogsParams {
+                    exact_generation: diagnostics.rules_generation,
+                    limit: 500,
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!("collect_logs failed on {} ({}): {e}", device.id, device.host)
+                })?;
+            let found = logs
+                .entries
+                .iter()
+                .any(|entry| entry.message.to_lowercase().contains(&pattern.to_lowercase()));
+            if found {
+                println!("verify ok lsposed_log {} pattern={}", check.mod_id, pattern);
+                ok += 1;
+            } else {
+                println!(
+                    "verify failed lsposed_log {} pattern={}",
+                    check.mod_id, pattern
+                );
+                failed += 1;
+            }
+        }
+    }
+
+    println!("verify_result ok={ok} failed={failed} skipped={skipped}");
+    if failed > 0 {
+        anyhow::bail!("verify failed: {failed} check(s) drifted or missing");
     }
     Ok(())
 }
@@ -101,7 +289,11 @@ fn profile_diff(path: &str, device_id: Option<&str>) -> Result<()> {
             profile.mods.len()
         );
         for m in &profile.mods {
-            println!("  + {} ({})", m.id(), if m.enabled() { "enabled" } else { "disabled" });
+            println!(
+                "  + {} ({})",
+                m.id(),
+                if m.enabled() { "enabled" } else { "disabled" }
+            );
         }
         return Ok(());
     }
@@ -126,7 +318,11 @@ fn profile_diff(path: &str, device_id: Option<&str>) -> Result<()> {
                 diffs.push(format!(
                     "  + {} ({})",
                     m.id(),
-                    if desired_enabled { "enabled" } else { "disabled" }
+                    if desired_enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
                 ));
             }
             _ => {}
@@ -162,7 +358,11 @@ fn profile_diff(path: &str, device_id: Option<&str>) -> Result<()> {
 }
 
 fn print_apply_plan(profile: &Profile) {
-    println!("apply plan for {} ({} mods):", profile.meta.id, profile.mods.len());
+    println!(
+        "apply plan for {} ({} mods):",
+        profile.meta.id,
+        profile.mods.len()
+    );
     for m in &profile.mods {
         println!("  - {} [{}]", m.id(), mod_type_label(m));
     }
@@ -186,11 +386,18 @@ fn mod_type_label(m: &ModEntry) -> &'static str {
 }
 
 fn config_root() -> PathBuf {
-    DeviceStore::default().path().parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+    DeviceStore::default()
+        .path()
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .to_path_buf()
 }
 
 fn known_state_path(device_id: &str, profile_id: &str) -> PathBuf {
-    config_root().join("states").join(device_id).join(format!("{profile_id}.json"))
+    config_root()
+        .join("states")
+        .join(device_id)
+        .join(format!("{profile_id}.json"))
 }
 
 fn save_known_state(device_id: &str, profile: &Profile) -> Result<()> {
@@ -198,8 +405,10 @@ fn save_known_state(device_id: &str, profile: &Profile) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut state = ProfileState::default();
-    state.active_profile = Some(profile.meta.id.clone());
+    let mut state = ProfileState {
+        active_profile: Some(profile.meta.id.clone()),
+        ..ProfileState::default()
+    };
     for m in &profile.mods {
         state.items.insert(
             m.id().to_string(),

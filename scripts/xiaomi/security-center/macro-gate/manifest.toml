@@ -1,0 +1,46 @@
+script_version = "1"
+
+[meta]
+id = "xiaomi/security-center/macro-gate"
+name = "Security Center macro gate (Dungeon Shooter)"
+author = "modspec contributors"
+description = """
+Allow the game-booster macro feature (ActiveNewModel.functionId=10020103) only
+for com.ChillyRoom.DungeonShooter on MIUI Security Center.
+
+Works across generations:
+- 12.3.x: O3.b.h(Context, String, boolean) resolved by static class name.
+- 12.7.x: MacroUtil (unstable obfuscated name, e.g. R3.b) resolved by the
+  evidence string `content://com.xiaomi.macro.MacroStatusProvider/game_macro_change`;
+  g()/h() (Context, String, boolean) are hooked — f() and h() are thin wrappers
+  over g(), which also bypasses the unsupported-macro black list (o0.m /
+  `pref_gb_unsupport_macro_apps`) for the target game only.
+
+The replace callback returns true solely for the target game; every other game
+keeps Security Center behavior. Unrelated ActiveNewModel features are never
+enabled globally; K.D is never touched. On failure the script emits structured
+hook_error events instead of failing silently.
+"""
+tags = ["xiaomi", "security-center", "gamebooster", "macro"]
+
+[compatible]
+packages = ["com.miui.securitycenter"]
+target_packages = ["com.ChillyRoom.DungeonShooter"]
+oem = ["Xiaomi"]
+min_android = 26
+
+[engine]
+runtime = "js"
+entrypoint = "src/main.js"
+
+[limits]
+execution_ms = 20000
+callback_ms = 50
+wait_class_ms = 30000
+
+[permissions]
+capabilities = ["emit", "log"]
+
+[verify]
+log_success = "macro_allowed"
+log_failure = "hook_error"

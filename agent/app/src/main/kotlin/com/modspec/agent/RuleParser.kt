@@ -40,13 +40,23 @@ data class DexQuery(
 )
 
 object RuleParser {
-    fun parseFile(file: File, androidSdk: Int = android.os.Build.VERSION.SDK_INT): ParsedRuleFile? =
-        runCatching { parse(Toml.parse(file.toPath()), androidSdk) }.getOrNull()
+    fun parseFile(
+        file: File,
+        androidSdk: Int = android.os.Build.VERSION.SDK_INT,
+        deviceOem: String? = null,
+        deviceRom: String? = null,
+    ): ParsedRuleFile? =
+        runCatching { parse(Toml.parse(file.toPath()), androidSdk, deviceOem, deviceRom) }.getOrNull()
 
-    fun parse(content: String, androidSdk: Int = android.os.Build.VERSION.SDK_INT): ParsedRuleFile =
-        parse(Toml.parse(content), androidSdk)
+    fun parse(
+        content: String,
+        androidSdk: Int = android.os.Build.VERSION.SDK_INT,
+        deviceOem: String? = null,
+        deviceRom: String? = null,
+    ): ParsedRuleFile =
+        parse(Toml.parse(content), androidSdk, deviceOem, deviceRom)
 
-    private fun parse(doc: TomlTable, androidSdk: Int): ParsedRuleFile {
+    private fun parse(doc: TomlTable, androidSdk: Int, deviceOem: String?, deviceRom: String?): ParsedRuleFile {
         val meta = doc.getTable("meta") ?: error("missing [meta]")
         val metaId = meta.getString("id") ?: error("missing meta.id")
 
@@ -55,7 +65,7 @@ object RuleParser {
 
         val defaultHooks = parseHooksArray(doc.getArray("hooks"))
         val variants = parseVariants(doc.getArray("variants"))
-        val resolvedHooks = resolveHooks(defaultHooks, variants, androidSdk)
+        val resolvedHooks = resolveHooks(defaultHooks, variants, androidSdk, deviceOem, deviceRom)
 
         return ParsedRuleFile(metaId, packages, resolvedHooks, variants)
     }
@@ -64,9 +74,17 @@ object RuleParser {
         default: List<ParsedHook>,
         variants: List<ParsedVariant>,
         androidSdk: Int,
+        deviceOem: String?,
+        deviceRom: String?,
     ): List<ParsedHook> {
         for (variant in variants) {
-            if (variant.android != null && variant.android == androidSdk && variant.hooks.isNotEmpty()) {
+            if (variant.hooks.isEmpty()) continue
+            val androidOk = variant.android == null || variant.android == androidSdk
+            val oemOk = variant.oem == null ||
+                (deviceOem != null && variant.oem.equals(deviceOem, ignoreCase = true))
+            val romOk = variant.rom == null ||
+                (deviceRom != null && variant.rom.equals(deviceRom, ignoreCase = true))
+            if (androidOk && oemOk && romOk) {
                 return variant.hooks
             }
         }

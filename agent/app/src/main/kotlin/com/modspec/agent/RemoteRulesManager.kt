@@ -17,7 +17,7 @@ object RemoteRulesManager {
     fun isAvailable(): Boolean = ModspecApp.xposedService != null
 
     fun remoteFileName(ruleId: String): String {
-        val safe = ruleId.replace('/', '_').replace('\\', '_')
+        val safe = AgentStorage.safeRuleName(ruleId)
         require(safe.isNotBlank() && safe != "." && safe != "..") { "invalid rule id: $ruleId" }
         return "$safe$RULE_SUFFIX"
     }
@@ -51,26 +51,36 @@ object RemoteRulesManager {
         }
     }
 
-    fun publishGeneration(activeRuleIds: Collection<String>? = null) {
-        val generation = System.currentTimeMillis()
+    fun publishGeneration(
+        activeRuleIds: Collection<String>? = null,
+        generation: Long = System.currentTimeMillis(),
+    ): Long {
         RemotePrefsManager.set(ModuleReloader.KEY_RULES_GENERATION, generation)
         activeRuleIds?.let { ids ->
             RemotePrefsManager.set(KEY_ACTIVE_RULES, JSONArray(ids.toList()).toString())
         }
+        return generation
     }
 
     /**
      * 主路径：RemoteFile + RemotePrefs；降级：legacy tmp 目录 + force-stop 由调用方处理。
      */
-    fun publishRules(context: Context, activeRuleIds: Collection<String>? = null): PublishMode {
+    fun publishRules(context: Context, activeRuleIds: Collection<String>? = null): PublishResult {
+        val now = System.currentTimeMillis()
+        val previous = if (isAvailable()) {
+            runCatching {
+                RemotePrefsManager.getGroup().getLong(ModuleReloader.KEY_RULES_GENERATION, 0L)
+            }.getOrDefault(0L)
+        } else 0L
+        val generation = maxOf(now, previous + 1)
         return if (isAvailable()) {
             syncFromLocal(context, activeRuleIds)
-            publishGeneration(activeRuleIds)
-            PublishMode.REMOTE_FILE
+            publishGeneration(activeRuleIds, generation)
+            PublishResult(PublishMode.REMOTE_FILE, generation)
         } else {
             AgentStorage.syncRulesToSharedLegacy(context)
-            runCatching { publishGeneration(activeRuleIds) }
-            PublishMode.LEGACY_TMP
+            runCatching { publishGeneration(activeRuleIds, generation) }
+            PublishResult(PublishMode.LEGACY_TMP, generation)
         }
     }
 
@@ -85,4 +95,5 @@ object RemoteRulesManager {
             ?: error("XposedService not bound")
 
     enum class PublishMode { REMOTE_FILE, LEGACY_TMP }
+    data class PublishResult(val mode: PublishMode, val generation: Long)
 }

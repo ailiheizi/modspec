@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use modspec_core::{Profile, RuleFile, validate_profile, validate_rule};
+use modspec_core::{validate_profile, validate_rule, Profile, RuleFile};
 
 pub fn validate_file(path: &str) -> Result<()> {
     if path.ends_with(".rule.toml") {
@@ -12,7 +12,11 @@ pub fn validate_file(path: &str) -> Result<()> {
 pub fn validate_profile_file(path: &str) -> Result<()> {
     let profile = Profile::from_file(path).with_context(|| format!("read profile {path}"))?;
     validate_profile(&profile)?;
-    println!("OK profile {} ({} mods)", profile.meta.id, profile.mods.len());
+    println!(
+        "OK profile {} ({} mods)",
+        profile.meta.id,
+        profile.mods.len()
+    );
     Ok(())
 }
 

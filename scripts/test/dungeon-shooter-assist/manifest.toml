@@ -1,0 +1,34 @@
+script_version = "1"
+
+[meta]
+id = "test/dungeon-shooter-assist"
+name = "Dungeon Shooter game assist (screen-on + immersive)"
+author = "modspec contributors"
+description = """
+Game assist demo for com.ChillyRoom.DungeonShooter (Unity):
+- screen never sleeps while the game is in the foreground (FLAG_KEEP_SCREEN_ON)
+- immersive sticky mode hides the status/navigation bars
+Every fired hook shows an in-game Toast (requires the `toast` capability).
+"""
+tags = ["test", "dungeon-shooter", "demo", "assist", "toast"]
+min_android = 26
+
+[compatible]
+packages = ["com.ChillyRoom.DungeonShooter"]
+target_packages = ["com.ChillyRoom.DungeonShooter"]
+
+[engine]
+runtime = "js"
+entrypoint = "src/main.js"
+
+[limits]
+execution_ms = 20000
+callback_ms = 50
+wait_class_ms = 30000
+
+[permissions]
+capabilities = ["emit", "log", "toast"]
+
+[verify]
+log_success = "assist_ready"
+log_failure = "hook_error"

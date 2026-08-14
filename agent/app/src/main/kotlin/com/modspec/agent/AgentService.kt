@@ -12,26 +12,43 @@ import android.os.IBinder
 import com.modspec.agent.rpc.LocalHttpServer
 import com.modspec.agent.rpc.LocalWsServer
 import com.modspec.agent.rpc.RpcHandler
+import com.modspec.agent.rpc.ServerSupervisor
 
 /**
  * Foreground companion service hosting the local HTTP (8764) and WebSocket (8765) RPC layer.
+ *
+ * The servers are supervised by [ServerSupervisor]: every start command pokes
+ * the supervisor so a dead accept loop is re-created immediately even when the
+ * service is already alive (START_STICKY means `onCreate` is not re-run), and
+ * a watchdog re-creates servers that die while idle.
  */
 class AgentService : Service() {
 
     private lateinit var rpcHandler: RpcHandler
-    private var httpServer: LocalHttpServer? = null
-    private var wsServer: LocalWsServer? = null
+    private lateinit var supervisor: ServerSupervisor
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
         rpcHandler = RpcHandler(applicationContext)
+        supervisor = ServerSupervisor(serverFactory = { name ->
+            when (name) {
+                "http" -> LocalHttpServer(rpcHandler, RpcHandler.HTTP_PORT)
+                "ws" -> LocalWsServer(rpcHandler, RpcHandler.WS_PORT)
+                else -> error("unknown server: $name")
+            }
+        })
+        rpcHandler.attachServerSupervisor(supervisor)
         startForeground(NOTIFICATION_ID, buildNotification())
-        httpServer = LocalHttpServer(rpcHandler, RpcHandler.HTTP_PORT).also { it.start() }
-        wsServer = LocalWsServer(rpcHandler, RpcHandler.WS_PORT).also { it.start() }
+        supervisor.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A repeated start (e.g. MainActivity calling AgentService.start() while
+        // the service is already alive) must still repair dead servers.
+        if (::supervisor.isInitialized) {
+            supervisor.poke()
+        }
         when (intent?.action) {
             ACTION_REAPPLY -> rpcHandler.reapplyFromIntent(intent.getBooleanExtra(EXTRA_ONLY_FAILED, false))
         }
@@ -40,10 +57,10 @@ class AgentService : Service() {
 
     override fun onDestroy() {
         isRunning = false
-        wsServer?.stop()
-        httpServer?.stop()
-        wsServer = null
-        httpServer = null
+        EventTailer.stop()
+        if (::supervisor.isInitialized) {
+            supervisor.stop()
+        }
         super.onDestroy()
     }
 

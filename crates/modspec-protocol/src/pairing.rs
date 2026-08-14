@@ -18,6 +18,7 @@ pub struct PairConfirm {
     pub device_id: String,
     pub device_name: String,
     pub model: String,
+    pub auth_token: String,
     #[serde(default)]
     pub android_version: Option<u32>,
 }

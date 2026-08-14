@@ -5,13 +5,14 @@ members = [
     "crates/modspec-protocol",
     "crates/modspec-cli",
     "crates/modspec-mcp",
+    "crates/modspec-adb",
 ]
 default-members = ["crates/modspec-cli"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 authors = ["modspec contributors"]
 repository = "https://github.com/modspec/modspec"
 
@@ -21,12 +22,13 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 thiserror = "2"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
@@ -34,3 +36,4 @@ futures-util = "0.3"
 modspec-core = { path = "crates/modspec-core" }
 modspec-protocol = { path = "crates/modspec-protocol" }
 modspec-mcp = { path = "crates/modspec-mcp" }
+modspec-adb = { path = "crates/modspec-adb" }

@@ -9,6 +9,7 @@ object PairingStore {
     private const val KEY_CODE = "pairing_code"
     private const val KEY_DEVICE_ID = "device_id"
     private const val KEY_DEVICE_NAME = "device_name"
+    private const val KEY_AUTH_TOKEN = "auth_token"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -39,5 +40,17 @@ object PairingStore {
     fun validateCode(context: Context, code: String): Boolean {
         val expected = getPairingCode(context) ?: return false
         return expected == code
+    }
+
+    fun rotateAuthToken(context: Context): String {
+        val token = UUID.randomUUID().toString().replace("-", "") +
+            UUID.randomUUID().toString().replace("-", "")
+        prefs(context).edit().putString(KEY_AUTH_TOKEN, token).commit()
+        return token
+    }
+
+    fun validateAuthToken(context: Context, token: String?): Boolean {
+        if (token.isNullOrBlank()) return false
+        return prefs(context).getString(KEY_AUTH_TOKEN, null) == token
     }
 }

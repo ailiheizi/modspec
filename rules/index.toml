@@ -1,16 +1,16 @@
 # Bundled rule index — community repo will extend this format.
 
 [[rules]]
-id = "xiaomi/joyose/block-cloud-fetch"
-path = "rules/xiaomi/joyose/block-cloud-fetch.rule.toml"
-tags = ["xiaomi", "joyose", "cloud", "performance"]
-
-[[rules]]
-id = "xiaomi/joyose/block-tracking"
-path = "rules/xiaomi/joyose/block-tracking.rule.toml"
-tags = ["xiaomi", "joyose", "privacy"]
-
-[[rules]]
 id = "universal/system/skip-kill-background"
 path = "rules/universal/system/skip-kill-background.rule.toml"
 tags = ["universal", "background", "system"]
+
+[[rules]]
+id = "test/smoke-joyose"
+path = "rules/test/smoke-joyose.rule.toml"
+tags = ["test", "joyose", "smoke"]
+
+[[rules]]
+id = "test/dungeon-shooter-observe"
+path = "rules/test/dungeon-shooter-observe.rule.toml"
+tags = ["test", "dungeon-shooter", "smoke", "observe"]

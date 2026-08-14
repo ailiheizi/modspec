@@ -3,7 +3,7 @@ rule_version = "1"
 [meta]
 id = "test/smoke-joyose"
 name = "Joyose Hook 冒烟测试"
-description = "注入 joyose 进程并 hook Activity.onCreate，仅观察不修改行为。"
+description = "注入 joyose 进程并 hook GPUTunerService.onBind，仅观察不修改行为。"
 author = "modspec-community"
 tags = ["test", "joyose", "smoke"]
 min_android = 33
@@ -13,7 +13,7 @@ packages = ["com.xiaomi.joyose"]
 
 [[hooks]]
 phase = "on_package_loaded"
-target = { resolver = "static", class = "com.xiaomi.joyose.network.TrackReporter", method = "report", signature = "(Ljava/lang/String;)V" }
+target = { resolver = "static", class = "com.xiaomi.joyose.securitycenter.GPUTunerService", method = "onBind", signature = "(Landroid/content/Intent;)Landroid/os/IBinder;" }
 action = { kind = "observe" }
 
 [verify]

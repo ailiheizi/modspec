@@ -55,6 +55,13 @@ dependencies {
     implementation("org.tomlj:tomlj:1.1.1")
     implementation("org.java-websocket:Java-WebSocket:1.5.6")
     implementation("org.luckypray:dexkit:2.0.5")
+
+    // Script engines: pure-Java runtimes (no native ABI surface).
+    // Rhino: MPL-2.0; LuaJ: MIT (see THIRD_PARTY_NOTICES).
+    implementation("org.mozilla:rhino:1.7.15")
+    implementation("org.luaj:luaj-jse:3.0.1")
+
+    testImplementation("junit:junit:4.12")
 }
 
 tasks.configureEach {

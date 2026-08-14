@@ -69,7 +69,7 @@ object EnvironmentChecker {
             checkXposedService(),
             checkAgentService(),
             checkPairing(context),
-        ),
+        ) + checkRemoteRules(context),
     )
 
     private fun checkRoot(): Item {
@@ -267,6 +267,44 @@ object EnvironmentChecker {
             status = if (code.length == 6) Status.OK else Status.WARN,
             detail = if (code.length == 6) "当前 $code" else "未生成",
         )
+    }
+
+    private fun checkRemoteRules(context: Context): List<Item> {
+        val state = AgentStorage.readState(context)
+        val ruleIds = AgentStorage.activeRuleIds(state)
+        if (ruleIds.isEmpty()) {
+            return listOf(
+                Item(
+                    id = "remote_rules",
+                    title = "远端规则同步",
+                    why = "rule_ref 依赖规则文件写入 rules/ 目录并被 Hook 进程加载。",
+                    status = Status.OK,
+                    detail = "no active rules",
+                ),
+            )
+        }
+        val missing = ruleIds.filter { !AgentStorage.ruleFile(context, it).exists() }
+        if (missing.isEmpty()) {
+            return listOf(
+                Item(
+                    id = "remote_rules",
+                    title = "远端规则同步",
+                    why = "rule_ref 依赖规则文件写入 rules/ 目录并被 Hook 进程加载。",
+                    status = Status.OK,
+                    detail = "active rules: ${ruleIds.size} 个文件均已存在",
+                ),
+            )
+        }
+        return missing.map { ruleId ->
+            Item(
+                id = "remote_rules",
+                title = "远端规则同步",
+                why = "rule_ref 依赖规则文件写入 rules/ 目录并被 Hook 进程加载。",
+                status = Status.FAIL,
+                detail = "active rule 缺少规则文件：$ruleId",
+                hint = "rule file missing; re-apply profile or modspec rule run",
+            )
+        }
     }
 
     private fun detectWorkingSu(): String? = ShellRunner.workingSuPath()
