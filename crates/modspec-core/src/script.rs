@@ -348,7 +348,12 @@ pub fn validate_script_bundle(bundle: &ScriptBundle) -> Result<()> {
 
     // The `frida` capability requires a declared native companion script that
     // is actually present in the bundle.
-    if manifest.permissions.capabilities.iter().any(|c| c == "frida") {
+    if manifest
+        .permissions
+        .capabilities
+        .iter()
+        .any(|c| c == "frida")
+    {
         let frida = manifest.frida.as_ref().ok_or_else(|| {
             ModspecError::Validation(
                 "capability `frida` requires a [frida] section with `script`".into(),

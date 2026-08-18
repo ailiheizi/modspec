@@ -92,7 +92,10 @@ impl std::str::FromStr for CommunityIndex {
 /// Lint a community index. When `repo_root` is `Some`, every profile path and
 /// rule ref is checked for existence (repo-relative). Returns all findings;
 /// callers decide the exit code via `issues.iter().any(|i| !i.ok)`.
-pub fn lint_community_index(index: &CommunityIndex, repo_root: Option<&Path>) -> Vec<CommunityIssue> {
+pub fn lint_community_index(
+    index: &CommunityIndex,
+    repo_root: Option<&Path>,
+) -> Vec<CommunityIssue> {
     let mut issues = Vec::new();
 
     let mut seen_profile_ids = HashSet::new();
@@ -147,7 +150,10 @@ pub fn lint_community_index(index: &CommunityIndex, repo_root: Option<&Path>) ->
             issues.push(CommunityIssue::error(
                 "rules",
                 &rule.id,
-                format!("invalid rule id `{}` (expected slash-separated segments)", rule.id),
+                format!(
+                    "invalid rule id `{}` (expected slash-separated segments)",
+                    rule.id
+                ),
             ));
         }
         if let Some(root) = repo_root {
@@ -191,9 +197,7 @@ pub fn lint_community_index(index: &CommunityIndex, repo_root: Option<&Path>) ->
 /// Lowercase alphanumeric (with hyphens), non-empty.
 fn is_valid_oem(oem: &str) -> bool {
     !oem.is_empty()
-        && oem
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && oem.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         && oem == oem.to_ascii_lowercase()
 }
 
@@ -235,11 +239,21 @@ mod tests {
     fn lint_reports_duplicates_and_format_issues() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let issues = lint_community_index(&sample_index(), Some(&repo));
-        assert!(issues.iter().any(|i| !i.ok && i.message.contains("duplicate profile id")));
-        assert!(issues.iter().any(|i| !i.ok && i.message.contains("invalid oem `OnePlus`")));
-        assert!(issues.iter().any(|i| !i.ok && i.message.contains("invalid rule id `bad id`")));
-        assert!(issues.iter().any(|i| !i.ok && i.message.contains("does not exist")));
-        assert!(!issues.iter().any(|i| !i.ok && i.section == "references.modules"));
+        assert!(issues
+            .iter()
+            .any(|i| !i.ok && i.message.contains("duplicate profile id")));
+        assert!(issues
+            .iter()
+            .any(|i| !i.ok && i.message.contains("invalid oem `OnePlus`")));
+        assert!(issues
+            .iter()
+            .any(|i| !i.ok && i.message.contains("invalid rule id `bad id`")));
+        assert!(issues
+            .iter()
+            .any(|i| !i.ok && i.message.contains("does not exist")));
+        assert!(!issues
+            .iter()
+            .any(|i| !i.ok && i.section == "references.modules"));
     }
 
     #[test]
@@ -259,7 +273,10 @@ mod tests {
         };
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../");
         let issues = lint_community_index(&index, Some(&repo));
-        assert!(!issues.iter().any(|i| !i.ok), "unexpected errors: {issues:?}");
+        assert!(
+            !issues.iter().any(|i| !i.ok),
+            "unexpected errors: {issues:?}"
+        );
     }
 
     #[test]

@@ -10,7 +10,11 @@ use crate::RuleAction;
 pub async fn run(action: RuleAction) -> Result<()> {
     match action {
         RuleAction::Validate { path } => super::validate::validate_rule_file(&path),
-        RuleAction::Init { id, package, output } => rule_init(&id, &package, output.as_deref()),
+        RuleAction::Init {
+            id,
+            package,
+            output,
+        } => rule_init(&id, &package, output.as_deref()),
         RuleAction::List => list_rules_index(),
         RuleAction::Run {
             path,
@@ -200,8 +204,7 @@ fn rule_init(id: &str, package: &str, output: Option<&str>) -> Result<()> {
         }
     };
     if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let text = toml::to_string(&rule).with_context(|| "serialize rule template")?;
     if output_path.exists() {

@@ -14,12 +14,12 @@ use crate::{
     DeployRuleResponse, DeviceInspection, DeviceStatus, GetLogsParams, GetLogsResponse,
     InspectDeviceParams, InstallFridaGadgetParams, InstallFridaGadgetResponse, JsonRpcRequest,
     JsonRpcResponse, ModuleDiagnostics, PingResponse, ProcessListParams, ProcessListResponse,
-    ReapplyParams, ReapplyResponse, RestartTargetsParams,
-    RestartTargetsResponse, ScriptDeployParams, ScriptDeployResponse, ScriptDisableParams,
-    ScriptDisableResponse, ScriptEnableParams, ScriptEnableResponse, ScriptListParams,
-    ScriptListResponse, ScriptReloadParams, ScriptReloadResponse, ScriptRemoveParams,
-    ScriptRemoveResponse, ScriptValidateParams, ScriptValidateResponse, SoftRestartParams,
-    SoftRestartResponse, TriggerAppParams, TriggerAppResponse, VerifyParams, VerifyResponse,
+    ReapplyParams, ReapplyResponse, RestartTargetsParams, RestartTargetsResponse,
+    ScriptDeployParams, ScriptDeployResponse, ScriptDisableParams, ScriptDisableResponse,
+    ScriptEnableParams, ScriptEnableResponse, ScriptListParams, ScriptListResponse,
+    ScriptReloadParams, ScriptReloadResponse, ScriptRemoveParams, ScriptRemoveResponse,
+    ScriptValidateParams, ScriptValidateResponse, SoftRestartParams, SoftRestartResponse,
+    TriggerAppParams, TriggerAppResponse, VerifyParams, VerifyResponse,
 };
 
 #[derive(Debug, Error)]

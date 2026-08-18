@@ -46,7 +46,10 @@ async fn verify_reapply_soft_restart_contract_against_fake_agent() {
         .await
         .unwrap();
     assert_eq!(verified.drift.len(), 1);
-    assert_eq!(verified.drift[0].mod_id.as_deref(), Some("hyper-perf-pack/joyose"));
+    assert_eq!(
+        verified.drift[0].mod_id.as_deref(),
+        Some("hyper-perf-pack/joyose")
+    );
     assert_eq!(verified.drift[0].kind.as_deref(), Some("rule_ref"));
     assert_eq!(
         verified.drift[0].expected.as_deref(),
@@ -143,9 +146,7 @@ async fn soft_restart_response_tolerates_minimal_payload() {
     let mut client = RpcClient::new("127.0.0.1", agent.port, agent.port);
     client.connect().await.unwrap();
     let restarted = client
-        .soft_restart(&SoftRestartParams {
-            rules_only: false,
-        })
+        .soft_restart(&SoftRestartParams { rules_only: false })
         .await
         .unwrap();
     assert!(!restarted.hot_reload_ok);

@@ -73,7 +73,10 @@ mod tests {
             profile_id: Some("hyper-perf-pack".into()),
         };
         let value = serde_json::to_value(&params).unwrap();
-        assert_eq!(value, serde_json::json!({ "profile_id": "hyper-perf-pack" }));
+        assert_eq!(
+            value,
+            serde_json::json!({ "profile_id": "hyper-perf-pack" })
+        );
     }
 
     #[test]
@@ -90,7 +93,10 @@ mod tests {
         let json = serde_json::to_value(&response).unwrap();
         let decoded: VerifyResponse = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, response);
-        assert_eq!(decoded.drift[0].mod_id.as_deref(), Some("hyper-perf-pack/joyose"));
+        assert_eq!(
+            decoded.drift[0].mod_id.as_deref(),
+            Some("hyper-perf-pack/joyose")
+        );
     }
 
     #[test]

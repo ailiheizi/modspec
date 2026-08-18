@@ -206,7 +206,14 @@ impl Adb {
         let local = local.to_string_lossy();
         let remote = remote.to_string_lossy();
         if let Some(parent) = Path::new(remote.as_ref()).parent() {
-            let _ = self.run(&["-s", &target, "shell", "mkdir", "-p", &parent.to_string_lossy()]);
+            let _ = self.run(&[
+                "-s",
+                &target,
+                "shell",
+                "mkdir",
+                "-p",
+                &parent.to_string_lossy(),
+            ]);
         }
         let _ = self.run(&["-s", &target, "push", &local, &remote])?;
         Ok(())

@@ -353,7 +353,8 @@ async fn ensure_frida_gadget(
         if !cached.is_file() {
             continue; // component not requested / not cached
         }
-        let staging = std::path::PathBuf::from("/data/local/tmp").join(stage.replace("<abi>", &abi));
+        let staging =
+            std::path::PathBuf::from("/data/local/tmp").join(stage.replace("<abi>", &abi));
         adb.push(serial, &cached, &staging).with_context(|| {
             format!(
                 "native layer: adb push {} -> {}",

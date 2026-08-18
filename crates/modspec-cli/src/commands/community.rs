@@ -49,7 +49,10 @@ fn lint_community_index(repo_root: &Path) -> Result<()> {
         }
     }
     if errors > 0 {
-        anyhow::bail!("community lint failed: {errors} issue(s) in {}", index_path.display());
+        anyhow::bail!(
+            "community lint failed: {errors} issue(s) in {}",
+            index_path.display()
+        );
     }
     println!(
         "community index OK: {} entries checked in {}",

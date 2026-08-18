@@ -254,7 +254,8 @@ mod tests {
 
     #[test]
     fn parse_example_rule() {
-        let content = include_str!("../../../rules/universal/system/skip-kill-background.rule.toml");
+        let content =
+            include_str!("../../../rules/universal/system/skip-kill-background.rule.toml");
         let rule: RuleFile = content.parse().expect("parse rule");
         assert_eq!(rule.meta.id, "universal/system/skip-kill-background");
     }

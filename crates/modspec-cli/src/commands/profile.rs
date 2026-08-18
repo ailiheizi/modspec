@@ -33,15 +33,7 @@ pub async fn run(action: ProfileAction) -> Result<()> {
             device,
             serial,
             no_bootstrap,
-        } => {
-            profile_verify(
-                &path,
-                device.as_deref(),
-                serial.as_deref(),
-                no_bootstrap,
-            )
-            .await
-        }
+        } => profile_verify(&path, device.as_deref(), serial.as_deref(), no_bootstrap).await,
     }
 }
 
@@ -247,12 +239,18 @@ async fn profile_verify(
                 })
                 .await
                 .map_err(|e| {
-                    anyhow::anyhow!("collect_logs failed on {} ({}): {e}", device.id, device.host)
+                    anyhow::anyhow!(
+                        "collect_logs failed on {} ({}): {e}",
+                        device.id,
+                        device.host
+                    )
                 })?;
-            let found = logs
-                .entries
-                .iter()
-                .any(|entry| entry.message.to_lowercase().contains(&pattern.to_lowercase()));
+            let found = logs.entries.iter().any(|entry| {
+                entry
+                    .message
+                    .to_lowercase()
+                    .contains(&pattern.to_lowercase())
+            });
             if found {
                 println!("verify ok lsposed_log {} pattern={}", check.mod_id, pattern);
                 ok += 1;
