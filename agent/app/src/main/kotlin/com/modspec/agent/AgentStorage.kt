@@ -55,9 +55,12 @@ object AgentStorage {
     fun ruleAssetPath(ruleId: String): String = "rules/$ruleId.rule.toml"
 
     fun ruleFile(context: Context, ruleId: String): File {
-        val safeName = ruleId.replace('/', '_')
+        val safeName = safeRuleName(ruleId)
         return File(rulesDir(context), "$safeName.rule.toml")
     }
+
+    fun safeRuleName(ruleId: String): String =
+        ruleId.replace("%", "%25").replace("/", "%2F")
 
     fun activeRuleIds(state: JSONObject): List<String> =
         state.optJSONArray("active_rules")

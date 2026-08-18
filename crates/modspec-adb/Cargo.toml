@@ -1,0 +1,9 @@
+[package]
+name = "modspec-adb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed, validated PC-side ADB capability layer for ModSpec"
+
+[dependencies]
+thiserror = { workspace = true }

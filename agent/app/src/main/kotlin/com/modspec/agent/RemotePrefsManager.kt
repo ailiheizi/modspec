@@ -24,7 +24,7 @@ object RemotePrefsManager {
             is String -> editor.putString(key, value)
             else -> editor.putString(key, value.toString())
         }
-        editor.apply()
+        check(editor.commit()) { "failed to commit remote preference $group/$key" }
     }
 
     fun setFromJson(key: String, jsonValue: Any?, group: String = DEFAULT_GROUP) {

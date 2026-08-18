@@ -33,7 +33,8 @@ pub struct ProfileState {
     #[serde(default)]
     pub active_rules: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_last_apply")]
-    pub last_apply: Option<DateTime<Utc>>,    #[serde(default)]
+    pub last_apply: Option<DateTime<Utc>>,
+    #[serde(default)]
     pub items: HashMap<String, ItemState>,
     #[serde(default)]
     pub lsposed_modules: HashMap<String, LsposedModuleState>,

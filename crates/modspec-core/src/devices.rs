@@ -26,6 +26,9 @@ pub struct StoredDevice {
     pub ws_port: u16,
     #[serde(default = "default_http_port")]
     pub http_port: u16,
+    /// Bearer token issued by the Agent during pairing.
+    #[serde(default)]
+    pub auth_token: Option<String>,
     pub paired_at: DateTime<Utc>,
 }
 
@@ -38,6 +41,25 @@ fn default_http_port() -> u16 {
 }
 
 impl StoredDevice {
+    /// True when a pairing bearer token is persisted for this device.
+    ///
+    /// Legacy/pre-token records deserialize fine (`auth_token == None`) but must
+    /// be re-paired before any dangerous RPC; see [`StoredDevice::require_auth`].
+    pub fn is_authorized(&self) -> bool {
+        self.auth_token.is_some()
+    }
+
+    /// Refuse dangerous RPC when no bearer token is available.
+    pub fn require_auth(&self) -> Result<()> {
+        if self.auth_token.is_none() {
+            return Err(ModspecError::Validation(format!(
+                "device {} has no bearer token (stale or pre-token record); re-pair first: `modspec pair scan`",
+                self.id
+            )));
+        }
+        Ok(())
+    }
+
     pub fn http_rpc_url(&self) -> String {
         format!("http://{}:{}/rpc", self.host, self.http_port)
     }
@@ -57,6 +79,7 @@ impl StoredDevice {
             host: host.into(),
             ws_port: default_ws_port(),
             http_port: default_http_port(),
+            auth_token: None,
             paired_at: Utc::now(),
         }
     }
@@ -78,10 +101,6 @@ impl DeviceStore {
         Self { path: path.into() }
     }
 
-    pub fn default() -> Self {
-        Self::new(Self::default_path())
-    }
-
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -99,7 +118,8 @@ impl DeviceStore {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let content = toml::to_string_pretty(config).map_err(|e| ModspecError::Validation(e.to_string()))?;
+        let content =
+            toml::to_string_pretty(config).map_err(|e| ModspecError::Validation(e.to_string()))?;
         std::fs::write(&self.path, content)?;
         Ok(())
     }
@@ -118,7 +138,10 @@ impl DeviceStore {
         Ok(config)
     }
 
-    pub fn resolve_device<'a>(config: &'a DevicesConfig, device_id: Option<&str>) -> Result<&'a StoredDevice> {
+    pub fn resolve_device<'a>(
+        config: &'a DevicesConfig,
+        device_id: Option<&str>,
+    ) -> Result<&'a StoredDevice> {
         match device_id {
             Some(id) => config
                 .devices
@@ -126,17 +149,24 @@ impl DeviceStore {
                 .find(|d| d.id == id)
                 .ok_or_else(|| ModspecError::Validation(format!("unknown device id: {id}"))),
             None => {
-                let default_id = config
-                    .default_device
-                    .as_deref()
-                    .ok_or_else(|| ModspecError::Validation("no default device; use --device".into()))?;
+                let default_id = config.default_device.as_deref().ok_or_else(|| {
+                    ModspecError::Validation("no default device; use --device".into())
+                })?;
                 config
                     .devices
                     .iter()
                     .find(|d| d.id == default_id)
-                    .ok_or_else(|| ModspecError::Validation(format!("default device not found: {default_id}")))
+                    .ok_or_else(|| {
+                        ModspecError::Validation(format!("default device not found: {default_id}"))
+                    })
             }
         }
+    }
+}
+
+impl Default for DeviceStore {
+    fn default() -> Self {
+        Self::new(Self::default_path())
     }
 }
 
@@ -163,6 +193,7 @@ mod tests {
             host: "192.168.1.42".into(),
             ws_port: 8765,
             http_port: 8764,
+            auth_token: Some("test-token".into()),
             paired_at: Utc.with_ymd_and_hms(2026, 1, 15, 10, 0, 0).unwrap(),
         }
     }
@@ -174,8 +205,10 @@ mod tests {
         let path = dir.join("devices.toml");
         let store = DeviceStore::new(&path);
 
-        let mut config = DevicesConfig::default();
-        config.default_device = Some("dev-1".into());
+        let mut config = DevicesConfig {
+            default_device: Some("dev-1".into()),
+            ..DevicesConfig::default()
+        };
         config.devices.push(sample_device("dev-1"));
         store.save(&config).unwrap();
 
@@ -212,8 +245,10 @@ mod tests {
 
     #[test]
     fn resolve_device_picks_default() {
-        let mut config = DevicesConfig::default();
-        config.default_device = Some("dev-a".into());
+        let mut config = DevicesConfig {
+            default_device: Some("dev-a".into()),
+            ..DevicesConfig::default()
+        };
         config.devices.push(sample_device("dev-a"));
         config.devices.push(sample_device("dev-b"));
 
@@ -229,5 +264,45 @@ mod tests {
         let config = DevicesConfig::default();
         let err = DeviceStore::resolve_device(&config, Some("missing")).unwrap_err();
         assert!(err.to_string().contains("unknown device id"));
+    }
+
+    #[test]
+    fn legacy_record_without_token_deserializes_and_requires_repair() {
+        let toml_str = r#"
+[[devices]]
+id = "legacy-1"
+name = "Old Phone"
+host = "127.0.0.1"
+paired_at = "2026-01-01T00:00:00Z"
+"#;
+        let config: DevicesConfig = toml::from_str(toml_str).unwrap();
+        let device = &config.devices[0];
+        assert!(!device.is_authorized());
+        let err = device.require_auth().unwrap_err();
+        assert!(err.to_string().contains("re-pair"));
+        // Default ports still resolve for old records.
+        assert_eq!(device.http_port, 8764);
+        assert_eq!(device.ws_port, 8765);
+    }
+
+    #[test]
+    fn bearer_token_roundtrips_through_toml() {
+        let dir = std::env::temp_dir().join(format!("modspec-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = DeviceStore::new(dir.join("devices.toml"));
+
+        let mut device = sample_device("dev-token");
+        device.auth_token = Some("super-secret-token".into());
+        store.upsert_device(device.clone()).unwrap();
+
+        let loaded = store.load().unwrap();
+        assert_eq!(
+            loaded.devices[0].auth_token.as_deref(),
+            Some("super-secret-token")
+        );
+        assert!(loaded.devices[0].is_authorized());
+        loaded.devices[0].require_auth().unwrap();
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

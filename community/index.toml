@@ -13,12 +13,12 @@ oem = ["oneplus"]
 tags = ["notification", "systemui"]
 
 [[rules]]
-id = "xiaomi/joyose/block-cloud-fetch"
-ref = "rules/xiaomi/joyose/block-cloud-fetch.rule.toml"
-
-[[rules]]
 id = "universal/system/skip-kill-background"
 ref = "rules/universal/system/skip-kill-background.rule.toml"
+
+[[rules]]
+id = "test/smoke-joyose"
+ref = "rules/test/smoke-joyose.rule.toml"
 
 # Reference modules (not shipped — user installs separately)
 [[references.modules]]

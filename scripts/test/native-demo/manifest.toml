@@ -1,0 +1,33 @@
+script_version = "1"
+
+[meta]
+id = "test/native-demo"
+name = "Native hook demo (xhook PLT bridge)"
+author = "modspec contributors"
+description = """
+Proves the on-demand native layer: declares the `native_hook` capability and
+hooks libc.getpid via the in-process xhook bridge. Every hit emits a structured
+`native_hit` event; original behavior is preserved (observe mode).
+"""
+tags = ["test", "native", "xhook", "demo"]
+min_android = 26
+
+[compatible]
+packages = ["com.ChillyRoom.DungeonShooter"]
+target_packages = ["com.ChillyRoom.DungeonShooter"]
+
+[engine]
+runtime = "js"
+entrypoint = "src/main.js"
+
+[limits]
+execution_ms = 20000
+callback_ms = 50
+wait_class_ms = 30000
+
+[permissions]
+capabilities = ["emit", "log", "native_hook"]
+
+[verify]
+log_success = "native_ready"
+log_failure = "hook_error"

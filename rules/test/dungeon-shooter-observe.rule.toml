@@ -1,0 +1,21 @@
+rule_version = "1"
+
+[meta]
+id = "test/dungeon-shooter-observe"
+name = "Dungeon Shooter onCreate 观察"
+description = "Hook com.chillyroomsdk.sdkbridge.BasePlayerApplication.onCreate（Unity 进程启动必调），仅观察不改行为，用于验证游戏进程 hook 链路。"
+author = "modspec-community"
+tags = ["test", "dungeon-shooter", "smoke", "observe"]
+min_android = 26
+
+[compatible]
+packages = ["com.ChillyRoom.DungeonShooter"]
+
+[[hooks]]
+phase = "on_package_loaded"
+target = { resolver = "static", class = "com.chillyroomsdk.sdkbridge.BasePlayerApplication", method = "onCreate", signature = "()V" }
+action = { kind = "observe" }
+
+[verify]
+log_success = "dungeon-observe.*hooked"
+log_failure = "ClassNotFoundException|Hook Failed"

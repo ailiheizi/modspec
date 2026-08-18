@@ -3,9 +3,13 @@ rule_version = "1"
 [meta]
 id = "universal/system/skip-kill-background"
 name = "拦截 killBackgroundProcesses（system）"
-description = "通用后台保活思路，参考 AppRetentionHook / Don't Kill。"
+description = """
+通用后台保活思路，参考 AppRetentionHook / Don't Kill。
+⚠️ 高风险实验：skip 会拦截系统对【所有】应用的 killBackgroundProcesses 调用，
+可能破坏内存压力下的正常回收。仅用于调试验证 system_server hook 链路。
+"""
 author = "modspec-community"
-tags = ["background", "keepalive", "universal"]
+tags = ["background", "keepalive", "universal", "experimental"]
 min_android = 30
 
 [compatible]
