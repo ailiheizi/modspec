@@ -1,12 +1,23 @@
 # ModSpec
 
-LSPosed 生态的配置编排平台：**Rust CLI** + **LSPosed 模块 (modspec-agent)**。
+> LSPosed 生态的配置编排平台：**Rust CLI** + **LSPosed 模块 (modspec-agent)**。
+
+*Declarative profile/rule orchestration for the LSPosed ecosystem — write
+`.mspec.toml` profiles and reusable `.rule.toml` hooks once, then apply, verify
+and debug them from the PC over ADB, with structured events instead of log
+grepping.*
 
 - 声明式 **`.mspec.toml`** profile（模块 scope、规则引用、重应用、验证）
 - 可复用 **`.rule.toml`** 通用 Hook 规则库
 - **JS/Lua Hook 脚本引擎**（Rhino / LuaJ，Frida 风格 `before/after/replace`，结构化事件）
+- **原生层能力**（按需下发，不内置 APK）：
+  - `frida`：Frida gadget（实验性，按需部署 + PC 交互）
+  - `native_hook`：ShadowHook PLT 桥（`modspec.nativeHook`，进程内零会话）
+- **只读设备/应用/进程清单** + `profile verify` 漂移验收 + `community lint`
 - 社区 profile / 规则 / 脚本索引
 - PC ↔ 手机 JSON-RPC（当前 HTTP `:8764` 主路径，ADB loopback；WS `:8765` 可选）
+
+> ⚠️ 实验性：需要 root + LSPosed 环境（Magisk/KernelSU）。当前为开发者预览，尚未作为稳定发行版。
 
 ## 快速开始（CLI）
 
