@@ -12,6 +12,7 @@ pub mod apps;
 pub mod client;
 pub mod connection;
 pub mod diagnostics;
+pub mod exec;
 pub mod inspect;
 pub mod logs;
 pub mod pairing;
@@ -27,6 +28,7 @@ pub use apps::*;
 pub use client::{RpcClient, RpcClientError};
 pub use connection::*;
 pub use diagnostics::*;
+pub use exec::*;
 pub use inspect::*;
 pub use logs::*;
 pub use pairing::*;
@@ -120,6 +122,7 @@ pub mod methods {
     pub const SCRIPT_REMOVE: &str = "script_remove";
     pub const SCRIPT_RELOAD: &str = "script_reload";
     pub const INSTALL_FRIDA_GADGET: &str = "install_frida_gadget";
+    pub const EXEC_SU: &str = "exec_su";
     pub const PING: &str = "ping";
 }
 

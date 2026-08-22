@@ -3,6 +3,7 @@ mod app;
 mod community;
 mod connect;
 mod device;
+mod exec;
 mod mcp;
 mod pair;
 mod process;
@@ -28,6 +29,11 @@ pub async fn dispatch(command: Commands) -> Result<()> {
         Commands::Device { action } => device::run(action).await,
         Commands::App { action } => app::run(action).await,
         Commands::Process { action } => process::run(action).await,
+        Commands::Exec {
+            command,
+            device,
+            timeout,
+        } => exec::run(&command, device.as_deref(), timeout).await,
         Commands::Adb { action } => adb::run(action),
         Commands::Connect {
             device,

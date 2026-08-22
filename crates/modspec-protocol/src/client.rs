@@ -11,15 +11,15 @@ use crate::{
     transport::{self, TransportKind},
     AppInfoParams, AppInfoResponse, AppListParams, AppListResponse, ApplyProfileParams,
     ApplyProfileResponse, CollectLogsParams, CollectLogsResponse, DeployRuleParams,
-    DeployRuleResponse, DeviceInspection, DeviceStatus, GetLogsParams, GetLogsResponse,
-    InspectDeviceParams, InstallFridaGadgetParams, InstallFridaGadgetResponse, JsonRpcRequest,
-    JsonRpcResponse, ModuleDiagnostics, PingResponse, ProcessListParams, ProcessListResponse,
-    ReapplyParams, ReapplyResponse, RestartTargetsParams, RestartTargetsResponse,
-    ScriptDeployParams, ScriptDeployResponse, ScriptDisableParams, ScriptDisableResponse,
-    ScriptEnableParams, ScriptEnableResponse, ScriptListParams, ScriptListResponse,
-    ScriptReloadParams, ScriptReloadResponse, ScriptRemoveParams, ScriptRemoveResponse,
-    ScriptValidateParams, ScriptValidateResponse, SoftRestartParams, SoftRestartResponse,
-    TriggerAppParams, TriggerAppResponse, VerifyParams, VerifyResponse,
+    DeployRuleResponse, DeviceInspection, DeviceStatus, ExecSuParams, ExecSuResponse,
+    GetLogsParams, GetLogsResponse, InspectDeviceParams, InstallFridaGadgetParams,
+    InstallFridaGadgetResponse, JsonRpcRequest, JsonRpcResponse, ModuleDiagnostics, PingResponse,
+    ProcessListParams, ProcessListResponse, ReapplyParams, ReapplyResponse, RestartTargetsParams,
+    RestartTargetsResponse, ScriptDeployParams, ScriptDeployResponse, ScriptDisableParams,
+    ScriptDisableResponse, ScriptEnableParams, ScriptEnableResponse, ScriptListParams,
+    ScriptListResponse, ScriptReloadParams, ScriptReloadResponse, ScriptRemoveParams,
+    ScriptRemoveResponse, ScriptValidateParams, ScriptValidateResponse, SoftRestartParams,
+    SoftRestartResponse, TriggerAppParams, TriggerAppResponse, VerifyParams, VerifyResponse,
 };
 
 #[derive(Debug, Error)]
@@ -268,6 +268,24 @@ impl RpcClient {
         params: &InstallFridaGadgetParams,
     ) -> Result<InstallFridaGadgetResponse> {
         self.call(methods::INSTALL_FRIDA_GADGET, serde_json::to_value(params)?)
+            .await
+    }
+
+    /// Run an arbitrary shell command via `su` on the device. Mutating — never
+    /// auto-retried (see [`crate::connection::is_read_only`]).
+    pub async fn exec_su(&self, params: &ExecSuParams) -> Result<ExecSuResponse> {
+        self.call(methods::EXEC_SU, serde_json::to_value(params)?)
+            .await
+    }
+
+    /// [`Self::exec_su`] with an explicit wall-clock timeout (the command may
+    /// block indefinitely on the device otherwise).
+    pub async fn exec_su_timeout(
+        &self,
+        params: &ExecSuParams,
+        timeout: std::time::Duration,
+    ) -> Result<ExecSuResponse> {
+        self.call_with_timeout(methods::EXEC_SU, serde_json::to_value(params)?, timeout)
             .await
     }
 

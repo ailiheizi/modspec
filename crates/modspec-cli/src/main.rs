@@ -49,6 +49,19 @@ pub enum Commands {
         #[command(subcommand)]
         action: ProcessAction,
     },
+    /// Run an arbitrary shell command on the device via `su` (explicit escape hatch)
+    #[command(name = "exec-su")]
+    Exec {
+        /// Command split into argv (use `--` before it if flags start with `-`)
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+        /// Device id (default: configured default device)
+        #[arg(long)]
+        device: Option<String>,
+        /// Wall-clock timeout in seconds for the device-side command (0 = default)
+        #[arg(long, default_value_t = 0)]
+        timeout: u64,
+    },
     /// Typed ADB transport helpers (discovery, forward, install, pull, ui-tree)
     Adb {
         #[command(subcommand)]

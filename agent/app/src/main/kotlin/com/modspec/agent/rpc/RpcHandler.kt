@@ -101,6 +101,7 @@ class RpcHandler(context: Context) {
                 METHOD_SCRIPT_REMOVE -> scriptRemove(params)
                 METHOD_SCRIPT_RELOAD -> scriptReload(params)
                 METHOD_INSTALL_FRIDA_GADGET -> installFridaGadget(params)
+                METHOD_EXEC_SU -> execSu(params)
                 else -> throw RpcException(-32601, "Method not found: $method")
             }
             jsonRpcResult(id, result)
@@ -753,6 +754,28 @@ class RpcHandler(context: Context) {
         return result
     }
 
+    /**
+     * Run an arbitrary command through `su` outside any hook/script context.
+     * The command is passed verbatim to `su -c`; callers own quoting and trust.
+     */
+    private fun execSu(params: JSONObject): JSONObject {
+        val command = params.optString("command").takeIf { it.isNotBlank() }
+            ?: throw RpcException(-32602, "missing command")
+        return ShellRunner.runSu(command)
+            .fold(
+                onSuccess = { output ->
+                    JSONObject()
+                        .put("success", true)
+                        .put("output", output.trim())
+                },
+                onFailure = { error ->
+                    JSONObject()
+                        .put("success", false)
+                        .put("error", error.message ?: "su command failed")
+                },
+            )
+    }
+
     /** Reused by [ScriptManager] for `script_reload --restart`. */
     private fun restartTargetsForScript(packages: List<String>): JSONObject {
         val payload = JSONObject().put("packages", JSONArray(packages))
@@ -795,6 +818,7 @@ class RpcHandler(context: Context) {
         const val METHOD_SCRIPT_REMOVE = "script_remove"
         const val METHOD_SCRIPT_RELOAD = "script_reload"
         const val METHOD_INSTALL_FRIDA_GADGET = "install_frida_gadget"
+        const val METHOD_EXEC_SU = "exec_su"
 
         private val PACKAGE_NAME = Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+")
         private val COMPONENT_CLASS = Regex("\\.?[A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*")
