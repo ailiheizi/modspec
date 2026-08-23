@@ -211,6 +211,19 @@ pub enum ModEntry {
         #[serde(default)]
         depends_on: Vec<String>,
     },
+    /// Declarative shell toggle rendered as an app switch; ON/OFF run su commands.
+    ShellToggle {
+        id: String,
+        #[serde(default = "default_true")]
+        enabled: bool,
+        title: String,
+        on_command: String,
+        off_command: String,
+        #[serde(default)]
+        status_command: Option<String>,
+        #[serde(default)]
+        status_pattern: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -291,7 +304,8 @@ impl ModEntry {
             | Self::RemoteBlob { id, .. }
             | Self::LsposedRestore { id, .. }
             | Self::Reload { id, .. }
-            | Self::PostAction { id, .. } => id,
+            | Self::PostAction { id, .. }
+            | Self::ShellToggle { id, .. } => id,
         }
     }
 
@@ -308,7 +322,8 @@ impl ModEntry {
             | Self::RemoteBlob { enabled, .. }
             | Self::LsposedRestore { enabled, .. }
             | Self::Reload { enabled, .. }
-            | Self::PostAction { enabled, .. } => *enabled,
+            | Self::PostAction { enabled, .. }
+            | Self::ShellToggle { enabled, .. } => *enabled,
         }
     }
 }
@@ -323,5 +338,69 @@ mod tests {
         let profile: Profile = content.parse().expect("parse profile");
         assert_eq!(profile.meta.id, "hyper-perf-pack");
         assert!(profile.mods.len() >= 3);
+    }
+
+    #[test]
+    fn parse_shell_toggle_mod() {
+        let content = r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "toggle-test"
+            name = "toggle"
+
+            [[mods]]
+            id = "hotspot-5ghz"
+            type = "shell_toggle"
+            enabled = true
+            title = "5GHz 热点"
+            on_command = "cmd wifi force-softap-band enabled 5"
+            off_command = "cmd wifi force-softap-band disabled"
+            status_command = "cmd wifi force-softap-band"
+        "#;
+        let profile: Profile = content.parse().expect("parse profile");
+        let entry = &profile.mods[0];
+        assert_eq!(entry.id(), "hotspot-5ghz");
+        assert!(entry.enabled());
+        let ModEntry::ShellToggle {
+            title,
+            on_command,
+            off_command,
+            status_command,
+            ..
+        } = entry
+        else {
+            panic!("expected shell_toggle mod");
+        };
+        assert_eq!(title, "5GHz 热点");
+        assert_eq!(on_command, "cmd wifi force-softap-band enabled 5");
+        assert_eq!(off_command, "cmd wifi force-softap-band disabled");
+        assert_eq!(status_command.as_deref(), Some("cmd wifi force-softap-band"));
+    }
+
+    #[test]
+    fn parse_shell_toggle_without_status_command() {
+        let content = r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "toggle-test-2"
+            name = "toggle"
+
+            [[mods]]
+            id = "some-toggle"
+            type = "shell_toggle"
+            title = "some toggle"
+            on_command = "on"
+            off_command = "off"
+        "#;
+        let profile: Profile = content.parse().expect("parse profile");
+        let ModEntry::ShellToggle {
+            status_command, ..
+        } = &profile.mods[0]
+        else {
+            panic!("expected shell_toggle mod");
+        };
+        assert!(status_command.is_none());
     }
 }

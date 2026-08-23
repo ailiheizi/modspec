@@ -70,6 +70,7 @@ class AppProfileApplier(private val context: Context) {
                     "remote_prefs" -> applyRemotePrefs(mod)
                     "remote_blob" -> applyRemoteBlob(mod)
                     "dynamic_scope" -> applyDynamicScope(mod)
+                    "shell_toggle" -> applyShellToggle(mod, state)
                     else -> item.put("status", "skipped")
                 }
                 if (!item.has("status")) item.put("status", "applied")
@@ -192,6 +193,21 @@ class AppProfileApplier(private val context: Context) {
         })
         latch.await(30, java.util.concurrent.TimeUnit.SECONDS)
         error?.let { throw it }
+    }
+
+    /** Persist a declarative shell toggle so the UI can render and drive it. */
+    private fun applyShellToggle(mod: JSONObject, state: JSONObject) {
+        val shellToggles = state.optJSONObject("shell_toggles") ?: JSONObject()
+        shellToggles.put(
+            mod.getString("id"),
+            JSONObject()
+                .put("title", mod.getString("title"))
+                .put("on_command", mod.getString("on_command"))
+                .put("off_command", mod.getString("off_command"))
+                .put("status_command", mod.optString("status_command").takeIf { it != "null" } ?: "")
+                .put("status_pattern", mod.optString("status_pattern").takeIf { it != "null" } ?: ""),
+        )
+        state.put("shell_toggles", shellToggles)
     }
 
     private fun topologicalSort(mods: JSONArray): List<JSONObject> {

@@ -380,6 +380,7 @@ fn mod_type_label(m: &ModEntry) -> &'static str {
         ModEntry::LsposedRestore { .. } => "lsposed_restore",
         ModEntry::Reload { .. } => "reload",
         ModEntry::PostAction { .. } => "post_action",
+        ModEntry::ShellToggle { .. } => "shell_toggle",
     }
 }
 

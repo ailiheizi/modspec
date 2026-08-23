@@ -21,6 +21,16 @@ data class HookProcessRow(
     val uid: Int?,
 )
 
+data class ShellToggleRow(
+    val id: String,
+    val title: String,
+    val onCommand: String,
+    val offCommand: String,
+    val statusCommand: String?,
+    val statusPattern: String?,
+    val currentStatus: Boolean,
+)
+
 data class HookPanelSnapshot(
     val serviceLabel: String,
     val serviceConnected: Boolean,
@@ -30,6 +40,7 @@ data class HookPanelSnapshot(
     val runningProcesses: List<HookProcessRow>,
     val logLines: List<String>,
     val primaryAction: PrimaryAction,
+    val shellToggles: List<ShellToggleRow>,
 )
 
 enum class PrimaryAction { SOFT_RESTART, RULES_ONLY, DISABLED }
@@ -70,6 +81,46 @@ object HookPanelLoader {
             ShellRunner.canSu() -> PrimaryAction.RULES_ONLY
             else -> PrimaryAction.DISABLED
         }
+        val toggles = state.optJSONObject("shell_toggles")
+            ?.let { obj ->
+                obj.keys().asSequence().mapNotNull { id ->
+                    val def = obj.getJSONObject(id)
+                    val persisted = state.optJSONObject("shell_toggle_state")
+                        ?.optBoolean(id, false) ?: false
+                    val statusCommand = def.optString("status_command")
+                        .takeIf { it.isNotBlank() && it != "null" }
+                    val statusPattern = def.optString("status_pattern")
+                        .takeIf { it.isNotBlank() && it != "null" }
+                    val current = when {
+                        statusCommand != null && ShellRunner.canSu() -> {
+                            val result = ShellRunner.runSu(statusCommand)
+                            val output = result.getOrNull()?.trim().orEmpty()
+                            when {
+                                // 查询失败：回退到持久化状态
+                                result.isFailure -> persisted
+                                // 有 pattern：匹配结果为准，但输出空时回退
+                                statusPattern != null -> {
+                                    if (output.isBlank()) persisted
+                                    else Regex(statusPattern).containsMatchIn(output)
+                                }
+                                // 无 pattern：非空视为开启，空输出回退
+                                else -> if (output.isBlank()) persisted else output.isNotBlank()
+                            }
+                        }
+                        else -> persisted
+                    }
+                    ShellToggleRow(
+                        id = id,
+                        title = def.optString("title").ifBlank { id },
+                        onCommand = def.optString("on_command"),
+                        offCommand = def.optString("off_command"),
+                        statusCommand = statusCommand,
+                        statusPattern = statusPattern,
+                        currentStatus = current,
+                    )
+                }.toList()
+            }
+            ?: emptyList()
         return HookPanelSnapshot(
             serviceLabel = XposedServiceCoordinator.statusLabel(),
             serviceConnected = connected,
@@ -79,6 +130,7 @@ object HookPanelLoader {
             runningProcesses = processes,
             logLines = LogTailReader.tail(8),
             primaryAction = primary,
+            shellToggles = toggles,
         )
     }
 }

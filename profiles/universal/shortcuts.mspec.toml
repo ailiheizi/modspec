@@ -1,0 +1,23 @@
+mspec_version = "1"
+
+[meta]
+id = "shortcuts"
+name = "快捷开关"
+description = "常用系统 shell 开关"
+author = "modspec"
+version = "1.0.0"
+tags = ["shortcut", "wifi"]
+
+[device]
+oem = "any"
+min_android = 26
+
+[[mods]]
+id = "hotspot-5ghz"
+type = "shell_toggle"
+enabled = true
+title = "5GHz 热点"
+on_command = "cmd wifi force-softap-band enabled 5"
+off_command = "cmd wifi force-softap-band disabled"
+status_command = "dumpsys wifi | grep mCurrentSoftApInfoMap"
+status_pattern = "frequency= 5"
