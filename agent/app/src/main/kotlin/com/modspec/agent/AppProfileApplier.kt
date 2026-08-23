@@ -28,6 +28,7 @@ class AppProfileApplier(private val context: Context) {
         state.put("active_profile", profileId)
         val items = state.optJSONObject("items") ?: JSONObject().also { state.put("items", it) }
         val activeRules = JSONArray()
+        val declaredCategories = parseDeclaredCategories(profile)
 
         val sorted = topologicalSort(mods)
         for (mod in sorted) {
@@ -70,7 +71,7 @@ class AppProfileApplier(private val context: Context) {
                     "remote_prefs" -> applyRemotePrefs(mod)
                     "remote_blob" -> applyRemoteBlob(mod)
                     "dynamic_scope" -> applyDynamicScope(mod)
-                    "shell_toggle" -> applyShellToggle(mod, state)
+                    "shell_toggle" -> applyShellToggle(mod, state, declaredCategories)
                     else -> item.put("status", "skipped")
                 }
                 if (!item.has("status")) item.put("status", "applied")
@@ -196,18 +197,69 @@ class AppProfileApplier(private val context: Context) {
     }
 
     /** Persist a declarative shell toggle so the UI can render and drive it. */
-    private fun applyShellToggle(mod: JSONObject, state: JSONObject) {
+    private fun applyShellToggle(
+        mod: JSONObject,
+        state: JSONObject,
+        declaredCategories: Map<String, String>,
+    ) {
         val shellToggles = state.optJSONObject("shell_toggles") ?: JSONObject()
-        shellToggles.put(
-            mod.getString("id"),
-            JSONObject()
-                .put("title", mod.getString("title"))
-                .put("on_command", mod.getString("on_command"))
-                .put("off_command", mod.getString("off_command"))
-                .put("status_command", mod.optString("status_command").takeIf { it != "null" } ?: "")
-                .put("status_pattern", mod.optString("status_pattern").takeIf { it != "null" } ?: ""),
-        )
+        val category = optModString(mod, "category")
+        val def = JSONObject()
+            .put("title", mod.getString("title"))
+            .put("on_command", mod.getString("on_command"))
+            .put("off_command", mod.getString("off_command"))
+        // 白名单透传所有新字段（缺省写空串，读取端按 blank 视为未配置）
+        for (key in listOf(
+            "description",
+            "applied_status_command",
+            "applied_status_pattern",
+            "effective_status_command",
+            "effective_status_pattern",
+            "requires_command",
+            "requires_pattern",
+            "requires_hint",
+            "auto_prereq_command",
+        )) {
+            def.put(key, optModString(mod, key) ?: "")
+        }
+        mod.optJSONArray("aliases")?.let { def.put("aliases", it) }
+        def.put("category", category ?: "")
+        def.put("category_titles", JSONArray(resolveCategoryTitles(category, declaredCategories)))
+        shellToggles.put(mod.getString("id"), def)
         state.put("shell_toggles", shellToggles)
+    }
+
+    /** [[categories]] 声明段：id → title。空 = 隐式模式。 */
+    private fun parseDeclaredCategories(profile: JSONObject): Map<String, String> {
+        val declarations = profile.optJSONArray("categories") ?: return emptyMap()
+        val result = LinkedHashMap<String, String>()
+        for (i in 0 until declarations.length()) {
+            val decl = declarations.optJSONObject(i) ?: continue
+            val id = optModString(decl, "id") ?: continue
+            result[id] = optModString(decl, "title") ?: id
+        }
+        return result
+    }
+
+    /**
+     * Resolve a raw category path into display titles:
+     * - 隐式模式（无声明段）：每一段直接作为显示标签；
+     * - 严格模式：逐级前缀查声明标题，未声明的层级回退用该段原文。
+     */
+    private fun resolveCategoryTitles(category: String?, declared: Map<String, String>): List<String> {
+        if (category.isNullOrBlank()) return emptyList()
+        val segments = category.split('/').map { it.trim() }.filter { it.isNotEmpty() }
+        if (segments.isEmpty() || segments.size > 2) return segments.take(2)
+        if (declared.isEmpty()) return segments
+        return segments.indices.map { index ->
+            val prefix = segments.take(index + 1).joinToString("/")
+            declared[prefix] ?: segments[index]
+        }
+    }
+
+    private fun optModString(obj: JSONObject, key: String): String? {
+        if (!obj.has(key) || obj.isNull(key)) return null
+        return obj.optString(key).takeIf { it.isNotBlank() && it != "null" }
     }
 
     private fun topologicalSort(mods: JSONArray): List<JSONObject> {

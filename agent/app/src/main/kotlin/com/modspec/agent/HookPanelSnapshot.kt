@@ -3,6 +3,7 @@ package com.modspec.agent
 import android.content.Context
 import io.github.libxposed.service.HookedTarget
 import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -21,15 +22,73 @@ data class HookProcessRow(
     val uid: Int?,
 )
 
+/**
+ * Declarative shell toggle with three independent status channels:
+ * - applied: 设置已应用（查持久化配置，如 settings get）
+ * - effective: 实时生效（查运行时状态，如 dumpsys）
+ * - precondition: 前置条件（如 softApEnabled）
+ * Any channel whose query fails or returns empty output is `null`（未知）——
+ * 不做持久化回退，未知就明示未知。
+ */
 data class ShellToggleRow(
     val id: String,
     val title: String,
+    val description: String?,
+    val aliases: List<String>,
+    val categoryId: String?,
+    val categoryTitles: List<String>,
     val onCommand: String,
     val offCommand: String,
-    val statusCommand: String?,
-    val statusPattern: String?,
-    val currentStatus: Boolean,
-)
+    val appliedStatusCommand: String?,
+    val appliedStatusPattern: String?,
+    val effectiveStatusCommand: String?,
+    val effectiveStatusPattern: String?,
+    val preconditionCommand: String?,
+    val preconditionPattern: String?,
+    val requiresHint: String?,
+    val autoPrereqCommand: String?,
+    /** 用户上次手动切换的意图（持久化），仅用于 appliedStatus 未知时保持开关位置。 */
+    val persistedIntent: Boolean,
+    val appliedStatus: Boolean?,
+    val effectiveStatus: Boolean?,
+    val preconditionMet: Boolean?,
+) {
+    /** Case-insensitive keyword match over title/description/aliases/id. */
+    fun matchesQuery(rawQuery: String): Boolean {
+        val query = rawQuery.trim()
+        if (query.isEmpty()) return true
+        return sequence {
+            yield(title)
+            yield(id)
+            description?.let { yield(it) }
+            yieldAll(aliases)
+        }.any { it.contains(query, ignoreCase = true) }
+    }
+}
+
+/**
+ * Query one status channel. Rules:
+ * - command 未配置 / 无 root / 执行失败 / 输出为空 → null（未知）
+ * - 有 pattern：输出匹配 → true，不匹配 → false
+ * - 无 pattern：输出非空 → true
+ */
+internal fun queryStatusChannel(rootAvailable: Boolean, command: String?, pattern: String?): Boolean? {
+    if (command.isNullOrBlank() || !rootAvailable) return null
+    val result = ShellRunner.runSu(command)
+    val output = result.getOrNull()?.trim().orEmpty()
+    if (result.isFailure || output.isEmpty()) return null
+    if (pattern.isNullOrBlank()) return true
+    return runCatching { Regex(pattern).containsMatchIn(output) }.getOrDefault(false)
+}
+
+/** Read a string field, treating JSON null / blank as absent; later keys act as legacy fallbacks. */
+internal fun optDefString(def: JSONObject, vararg keys: String): String? {
+    for (key in keys) {
+        val value = def.optString(key)
+        if (value.isNotBlank() && value != "null") return value
+    }
+    return null
+}
 
 data class HookPanelSnapshot(
     val serviceLabel: String,
@@ -81,42 +140,54 @@ object HookPanelLoader {
             ShellRunner.canSu() -> PrimaryAction.RULES_ONLY
             else -> PrimaryAction.DISABLED
         }
+        val rootAvailable = ShellRunner.canSu()
         val toggles = state.optJSONObject("shell_toggles")
             ?.let { obj ->
                 obj.keys().asSequence().mapNotNull { id ->
                     val def = obj.getJSONObject(id)
-                    val persisted = state.optJSONObject("shell_toggle_state")
+                    val persistedIntent = state.optJSONObject("shell_toggle_state")
                         ?.optBoolean(id, false) ?: false
-                    val statusCommand = def.optString("status_command")
-                        .takeIf { it.isNotBlank() && it != "null" }
-                    val statusPattern = def.optString("status_pattern")
-                        .takeIf { it.isNotBlank() && it != "null" }
-                    val current = when {
-                        statusCommand != null && ShellRunner.canSu() -> {
-                            val result = ShellRunner.runSu(statusCommand)
-                            val output = result.getOrNull()?.trim().orEmpty()
-                            when {
-                                // 查询失败：回退到持久化状态
-                                result.isFailure -> persisted
-                                // 有 pattern：匹配结果为准，但输出空时回退
-                                statusPattern != null -> {
-                                    if (output.isBlank()) persisted
-                                    else Regex(statusPattern).containsMatchIn(output)
-                                }
-                                // 无 pattern：非空视为开启，空输出回退
-                                else -> if (output.isBlank()) persisted else output.isNotBlank()
-                            }
+                    // 旧 profile 的 status_command/status_pattern 作为 applied 通道的回退
+                    val appliedCommand = optDefString(def, "applied_status_command", "status_command")
+                    val appliedPattern = optDefString(def, "applied_status_pattern", "status_pattern")
+                    val effectiveCommand = optDefString(def, "effective_status_command")
+                    val effectivePattern = optDefString(def, "effective_status_pattern")
+                    val preconditionCommand = optDefString(def, "requires_command")
+                    val preconditionPattern = optDefString(def, "requires_pattern")
+                    val categoryTitles = def.optJSONArray("category_titles")
+                        ?.let { arr ->
+                            (0 until arr.length())
+                                .mapNotNull { arr.optString(it, null) }
+                                .filter { it.isNotBlank() }
                         }
-                        else -> persisted
-                    }
+                        .orEmpty()
                     ShellToggleRow(
                         id = id,
                         title = def.optString("title").ifBlank { id },
+                        description = optDefString(def, "description"),
+                        aliases = def.optJSONArray("aliases")
+                            ?.let { arr ->
+                                (0 until arr.length())
+                                    .mapNotNull { arr.optString(it, null) }
+                                    .filter { it.isNotBlank() }
+                            }
+                            .orEmpty(),
+                        categoryId = optDefString(def, "category"),
+                        categoryTitles = categoryTitles,
                         onCommand = def.optString("on_command"),
                         offCommand = def.optString("off_command"),
-                        statusCommand = statusCommand,
-                        statusPattern = statusPattern,
-                        currentStatus = current,
+                        appliedStatusCommand = appliedCommand,
+                        appliedStatusPattern = appliedPattern,
+                        effectiveStatusCommand = effectiveCommand,
+                        effectiveStatusPattern = effectivePattern,
+                        preconditionCommand = preconditionCommand,
+                        preconditionPattern = preconditionPattern,
+                        requiresHint = optDefString(def, "requires_hint"),
+                        autoPrereqCommand = optDefString(def, "auto_prereq_command"),
+                        persistedIntent = persistedIntent,
+                        appliedStatus = queryStatusChannel(rootAvailable, appliedCommand, appliedPattern),
+                        effectiveStatus = queryStatusChannel(rootAvailable, effectiveCommand, effectivePattern),
+                        preconditionMet = queryStatusChannel(rootAvailable, preconditionCommand, preconditionPattern),
                     )
                 }.toList()
             }

@@ -9,7 +9,10 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,12 +33,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -43,10 +50,12 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -57,15 +66,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.modspec.agent.ui.theme.ColorAccent
@@ -289,12 +302,49 @@ private fun AgentApp(
     }
 }
 
+private const val UNCATEGORIZED_KEY = "__uncategorized__"
+
+/** 分组：同页可折叠；未分类固定最后。 */
+private data class ToggleGroup(
+    val key: String,
+    val title: String,
+    val toggles: List<ShellToggleRow>,
+)
+
+private fun groupToggles(toggles: List<ShellToggleRow>): List<ToggleGroup> {
+    val byKey = LinkedHashMap<String, MutableList<ShellToggleRow>>()
+    for (toggle in toggles) {
+        val key = toggle.categoryTitles.joinToString("/")
+            .ifBlank { UNCATEGORIZED_KEY }
+        byKey.getOrPut(key) { mutableListOf() }.add(toggle)
+    }
+    val orderedKeys = byKey.keys.filter { it != UNCATEGORIZED_KEY } +
+        listOfNotNull(UNCATEGORIZED_KEY.takeIf { byKey.containsKey(it) })
+    return orderedKeys.map { key ->
+        ToggleGroup(
+            key = key,
+            title = if (key == UNCATEGORIZED_KEY) "未分类" else key.replace("/", " / "),
+            toggles = byKey.getValue(key),
+        )
+    }
+}
+
 @Composable
 private fun ShortcutsPage(
     toggles: List<ShellToggleRow>,
     loading: Boolean,
     onToggleChanged: (ShellToggleRow, Boolean) -> Unit,
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    // 折叠状态会话内记忆（rememberSaveable）；默认全展开
+    var collapsedGroups by rememberSaveable { mutableStateOf(emptySet<String>()) }
+
+    val filtered = remember(toggles, query) {
+        val q = query.trim()
+        if (q.isEmpty()) toggles else toggles.filter { it.matchesQuery(q) }
+    }
+    val groups = remember(filtered) { groupToggles(filtered) }
+
     LazyColumn(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -305,20 +355,125 @@ private fun ShortcutsPage(
                 subtitle = "由 profile 声明的 shell 开关，独立于 Hook 规则",
             )
         }
-        if (loading && toggles.isEmpty()) {
-            item {
-                LoadingRow()
+        item {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("搜索开关（标题 / 描述 / 别名）") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Filled.Close, contentDescription = "清除搜索")
+                        }
+                    }
+                },
+            )
+        }
+        when {
+            loading && toggles.isEmpty() -> {
+                item { LoadingRow() }
             }
-        } else if (toggles.isEmpty()) {
-            item {
-                EmptyState("暂无已声明的快捷开关，请在 profile 中添加 shell_toggle mod")
+            toggles.isEmpty() -> {
+                item {
+                    EmptyState("暂无已声明的快捷开关，请在 profile 中添加 shell_toggle mod")
+                }
             }
-        } else {
-            items(toggles, key = { it.id }) { toggle ->
-                ToggleCard(
-                    toggle = toggle,
-                    onToggleChanged = { checked -> onToggleChanged(toggle, checked) },
+            filtered.isEmpty() -> {
+                item { EmptyState("无匹配开关") }
+            }
+            groups.size == 1 -> {
+                // 只有一组：隐藏分组头完全平铺（与无分组时一致）
+                items(groups[0].toggles, key = { it.id }) { toggle ->
+                    ToggleCard(
+                        toggle = toggle,
+                        onToggleChanged = { checked -> onToggleChanged(toggle, checked) },
+                    )
+                }
+            }
+            else -> {
+                groups.forEach { group ->
+                    item(key = "group_${group.key}") {
+                        ExpandableGroupCard(
+                            group = group,
+                            collapsed = group.key in collapsedGroups,
+                            onToggleCollapsed = {
+                                collapsedGroups =
+                                    if (group.key in collapsedGroups) {
+                                        collapsedGroups - group.key
+                                    } else {
+                                        collapsedGroups + group.key
+                                    }
+                            },
+                            onToggleChanged = onToggleChanged,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpandableGroupCard(
+    group: ToggleGroup,
+    collapsed: Boolean,
+    onToggleCollapsed: () -> Unit,
+    onToggleChanged: (ShellToggleRow, Boolean) -> Unit,
+) {
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (collapsed) -90f else 0f,
+        label = "chevron",
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(modifier = Modifier.animateContentSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleCollapsed)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = group.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
                 )
+                Text(
+                    text = "${group.toggles.size}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Filled.ExpandMore,
+                    contentDescription = if (collapsed) "展开" else "折叠",
+                    modifier = Modifier.graphicsLayer { rotationZ = chevronRotation },
+                )
+            }
+            if (!collapsed) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    group.toggles.forEach { toggle ->
+                        ToggleCard(
+                            toggle = toggle,
+                            onToggleChanged = { checked -> onToggleChanged(toggle, checked) },
+                        )
+                    }
+                }
             }
         }
     }
@@ -329,6 +484,41 @@ private fun ToggleCard(
     toggle: ShellToggleRow,
     onToggleChanged: (Boolean) -> Unit,
 ) {
+    val preconditionBlocked = toggle.preconditionMet == false
+    val appliedUnknown = toggle.appliedStatus == null
+    // Switch checked 以 applied 为准；未知时保持 intent 位置（半透明）
+    val checked = toggle.appliedStatus ?: toggle.persistedIntent
+
+    val subtitle: String?
+    val subtitleColor: Color
+    when {
+        preconditionBlocked -> {
+            subtitle = toggle.requiresHint?.takeIf { it.isNotBlank() } ?: "前置条件未满足"
+            subtitleColor = ColorStatusWarn
+        }
+        appliedUnknown && toggle.appliedStatusCommand != null -> {
+            subtitle = "状态未知（查询失败）"
+            subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        // 未配置状态查询命令时保持旧行为：不显示状态行
+        appliedUnknown -> {
+            subtitle = null
+            subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        toggle.appliedStatus == true && toggle.effectiveStatus != false -> {
+            subtitle = "已开启"
+            subtitleColor = ColorStatusOk
+        }
+        toggle.appliedStatus == true -> {
+            subtitle = "已设置，待条件满足后生效"
+            subtitleColor = ColorStatusWarn
+        }
+        else -> {
+            subtitle = "未设置"
+            subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -343,23 +533,47 @@ private fun ToggleCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = toggle.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                if (toggle.statusCommand != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = toggle.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    if (preconditionBlocked) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.Warning,
+                            contentDescription = "前置条件未满足",
+                            tint = ColorStatusWarn,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+                toggle.description?.let { description ->
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = if (toggle.currentStatus) "当前状态：开启" else "当前状态：关闭",
+                        text = description,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                subtitle?.let { text ->
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = subtitleColor,
                     )
                 }
             }
+            Spacer(Modifier.width(8.dp))
             Switch(
-                checked = toggle.currentStatus,
+                checked = checked,
                 onCheckedChange = onToggleChanged,
+                enabled = !preconditionBlocked,
+                modifier = Modifier.alpha(if (appliedUnknown || preconditionBlocked) 0.5f else 1f),
             )
         }
     }
@@ -1111,6 +1325,38 @@ private fun onShellToggleChanged(
         return
     }
     CoroutineScope(Dispatchers.IO).launch {
+        // 点击前评估前置条件（实时查询）
+        val preconditionMet = queryStatusChannel(
+            rootAvailable = true,
+            command = toggle.preconditionCommand,
+            pattern = toggle.preconditionPattern,
+        )
+        if (preconditionMet == false) {
+            val autoPrereq = toggle.autoPrereqCommand?.takeIf { it.isNotBlank() }
+            if (autoPrereq == null) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context,
+                        toggle.requiresHint?.takeIf { it.isNotBlank() } ?: "前置条件未满足",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    onRefresh()
+                }
+                return@launch
+            }
+            val prereqResult = ShellRunner.runSu(autoPrereq)
+            if (prereqResult.isFailure) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context,
+                        "自动补救执行失败：${prereqResult.exceptionOrNull()?.message ?: "unknown"}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    onRefresh()
+                }
+                return@launch
+            }
+        }
         val result = ShellRunner.runSu(command)
         withContext(Dispatchers.Main) {
             if (result.isSuccess) {
