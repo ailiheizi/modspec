@@ -19,6 +19,12 @@ pub enum ModspecError {
     #[error("unknown mod id in dependency: {0}")]
     UnknownDependency(String),
 
+    #[error("unknown category id: {0}")]
+    UnknownCategory(String),
+
+    #[error("duplicate category id: {0}")]
+    DuplicateCategoryId(String),
+
     #[error("validation: {0}")]
     Validation(String),
 

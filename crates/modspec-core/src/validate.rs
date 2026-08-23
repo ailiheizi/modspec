@@ -32,7 +32,96 @@ pub fn validate_profile(profile: &Profile) -> Result<()> {
         }
     }
 
+    validate_categories(profile)?;
+
     Ok(())
+}
+
+/// Max category hierarchy depth (`a/b` = 2 levels).
+pub const MAX_CATEGORY_DEPTH: usize = 2;
+
+/// Description longer than this yields a warning (not an error).
+pub const DESCRIPTION_MAX_LEN: usize = 500;
+
+fn category_depth(id: &str) -> usize {
+    id.split('/').filter(|s| !s.is_empty()).count()
+}
+
+fn validate_categories(profile: &Profile) -> Result<()> {
+    let mut declared: HashSet<&str> = HashSet::new();
+    for cat in &profile.categories {
+        let id = cat.id.as_str().trim();
+        if id.is_empty() {
+            return Err(ModspecError::Validation("category id is required".into()));
+        }
+        if !declared.insert(id) {
+            return Err(ModspecError::DuplicateCategoryId(id.to_string()));
+        }
+        if category_depth(id) > MAX_CATEGORY_DEPTH {
+            return Err(ModspecError::Validation(format!(
+                "category `{id}` exceeds {MAX_CATEGORY_DEPTH} levels"
+            )));
+        }
+    }
+    let strict = !declared.is_empty();
+
+    if !strict {
+        // Implicit mode: no declaration section, category strings are display labels.
+        for entry in &profile.mods {
+            if let Some(cat) = mod_category(entry) {
+                if category_depth(cat) > MAX_CATEGORY_DEPTH {
+                    return Err(ModspecError::Validation(format!(
+                        "category `{cat}` exceeds {MAX_CATEGORY_DEPTH} levels"
+                    )));
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    // Strict mode: child paths must have their parent path declared.
+    for id in &declared {
+        if let Some((parent, _)) = id.rsplit_once('/') {
+            if !parent.is_empty() && !declared.contains(parent) {
+                return Err(ModspecError::UnknownCategory(parent.to_string()));
+            }
+        }
+    }
+    for entry in &profile.mods {
+        if let Some(cat) = mod_category(entry) {
+            if !declared.contains(cat) {
+                return Err(ModspecError::UnknownCategory(cat.to_string()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn mod_category(entry: &ModEntry) -> Option<&str> {
+    entry
+        .common()
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+}
+
+/// Non-fatal lint warnings (currently: overly long descriptions).
+pub fn profile_lint_warnings(profile: &Profile) -> Vec<String> {
+    profile
+        .mods
+        .iter()
+        .filter_map(|entry| {
+            let description = entry.common().description.as_deref()?;
+            let len = description.chars().count();
+            (len > DESCRIPTION_MAX_LEN).then(|| {
+                format!(
+                    "mod '{}': description is {len} characters (max {DESCRIPTION_MAX_LEN})",
+                    entry.id()
+                )
+            })
+        })
+        .collect()
 }
 
 pub fn validate_rule(rule: &RuleFile) -> Result<()> {
@@ -128,5 +217,202 @@ mod tests {
             .parse()
             .unwrap();
         validate_rule(&rule).unwrap();
+    }
+
+    #[test]
+    fn strict_mode_accepts_declared_categories() {
+        let profile: Profile = r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "cat-ok"
+            name = "cats"
+
+            [[categories]]
+            id = "network"
+            title = "网络"
+
+            [[categories]]
+            id = "network/hotspot"
+            title = "热点"
+
+            [[mods]]
+            id = "t"
+            type = "shell_toggle"
+            title = "t"
+            on_command = "on"
+            off_command = "off"
+            category = "network/hotspot"
+
+            [[mods]]
+            id = "u"
+            type = "reload"
+            packages = ["a"]
+        "#
+        .parse()
+        .unwrap();
+        validate_profile(&profile).unwrap();
+    }
+
+    #[test]
+    fn strict_mode_rejects_unknown_category() {
+        let profile: Profile = r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "cat-bad-ref"
+            name = "cats"
+
+            [[categories]]
+            id = "network"
+            title = "网络"
+
+            [[mods]]
+            id = "t"
+            type = "shell_toggle"
+            title = "t"
+            on_command = "on"
+            off_command = "off"
+            category = "display/screen"
+        "#
+        .parse()
+        .unwrap();
+        assert!(matches!(
+            validate_profile(&profile),
+            Err(ModspecError::UnknownCategory(_))
+        ));
+    }
+
+    #[test]
+    fn strict_mode_requires_parent_path() {
+        let profile: Profile = r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "cat-missing-parent"
+            name = "cats"
+
+            [[categories]]
+            id = "network/hotspot"
+            title = "热点"
+
+            [[mods]]
+            id = "t"
+            type = "shell_toggle"
+            title = "t"
+            on_command = "on"
+            off_command = "off"
+            category = "network/hotspot"
+        "#
+        .parse()
+        .unwrap();
+        assert!(matches!(
+            validate_profile(&profile),
+            Err(ModspecError::UnknownCategory(id)) if id == "network"
+        ));
+    }
+
+    #[test]
+    fn duplicate_category_id_rejected() {
+        let profile: Profile = r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "cat-dup"
+            name = "cats"
+
+            [[categories]]
+            id = "network"
+            title = "网络"
+
+            [[categories]]
+            id = "network"
+            title = "网络二"
+
+            [[mods]]
+            id = "t"
+            type = "shell_toggle"
+            title = "t"
+            on_command = "on"
+            off_command = "off"
+        "#
+        .parse()
+        .unwrap();
+        assert!(matches!(
+            validate_profile(&profile),
+            Err(ModspecError::DuplicateCategoryId(_))
+        ));
+    }
+
+    #[test]
+    fn category_max_two_levels_enforced() {
+        let profile: Profile = r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "cat-deep"
+            name = "cats"
+
+            [[mods]]
+            id = "t"
+            type = "shell_toggle"
+            title = "t"
+            on_command = "on"
+            off_command = "off"
+            category = "a/b/c"
+        "#
+        .parse()
+        .unwrap();
+        assert!(validate_profile(&profile).is_err());
+    }
+
+    #[test]
+    fn description_length_warning() {
+        let long = "长".repeat(DESCRIPTION_MAX_LEN + 1);
+        let content = format!(
+            r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "desc-warn"
+            name = "d"
+
+            [[mods]]
+            id = "t"
+            type = "shell_toggle"
+            title = "t"
+            description = "{long}"
+            on_command = "on"
+            off_command = "off"
+            "#
+        );
+        let profile: Profile = content.parse().unwrap();
+        // Warning, not an error.
+        validate_profile(&profile).unwrap();
+        let warnings = profile_lint_warnings(&profile);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("mod 't'"));
+    }
+
+    #[test]
+    fn short_description_no_warning() {
+        let profile: Profile = r#"
+            mspec_version = "1"
+
+            [meta]
+            id = "desc-ok"
+            name = "d"
+
+            [[mods]]
+            id = "t"
+            type = "shell_toggle"
+            title = "t"
+            description = "简短描述"
+            on_command = "on"
+            off_command = "off"
+        "#
+        .parse()
+        .unwrap();
+        assert!(profile_lint_warnings(&profile).is_empty());
     }
 }

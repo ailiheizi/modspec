@@ -45,6 +45,9 @@ fn validate_profile_file(path: &str) -> Result<()> {
         profile.meta.id,
         profile.mods.len()
     );
+    for warning in modspec_core::profile_lint_warnings(&profile) {
+        println!("warning: {warning}");
+    }
     Ok(())
 }
 
@@ -362,7 +365,14 @@ fn print_apply_plan(profile: &Profile) {
         profile.mods.len()
     );
     for m in &profile.mods {
-        println!("  - {} [{}]", m.id(), mod_type_label(m));
+        let category = m
+            .common()
+            .category
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .unwrap_or("-");
+        println!("  - {} [{}] @{}", m.id(), mod_type_label(m), category);
     }
 }
 

@@ -5,19 +5,67 @@ id = "shortcuts"
 name = "快捷开关"
 description = "常用系统 shell 开关"
 author = "modspec"
-version = "1.0.0"
+version = "1.1.0"
 tags = ["shortcut", "wifi"]
 
 [device]
 oem = "any"
 min_android = 26
 
+# 声明段 = 严格模式：mod.category 必须引用已声明的 id；顺序 = 声明顺序
+[[categories]]
+id = "network"
+title = "网络"
+
+[[categories]]
+id = "network/hotspot"
+title = "热点"
+icon = "wifi_tethering"
+
+[[categories]]
+id = "display"
+title = "显示"
+
+[[categories]]
+id = "display/stay-awake"
+title = "充电保持唤醒"
+
 [[mods]]
 id = "hotspot-5ghz"
 type = "shell_toggle"
 enabled = true
-title = "5GHz 热点"
+title = "5GHz 热点强制"
+description = "强制热点使用 5GHz 频段，速率更高、干扰更少。适合投屏与大文件传输。"
+aliases = ["hotspot band", "softap 5g", "便携热点"]
+category = "network/hotspot"
 on_command = "cmd wifi force-softap-band enabled 5"
 off_command = "cmd wifi force-softap-band disabled"
-status_command = "dumpsys wifi | grep mCurrentSoftApInfoMap"
-status_pattern = "frequency= 5"
+
+# 「设置已应用」通道：查持久化配置（旧 status_command/status_pattern 会自动映射到这里）
+applied_status_command = "settings get global wifi_ap_settings_band"
+applied_status_pattern = "^[12]$"
+
+# 「实时生效」通道：可选，查运行时状态
+effective_status_command = "dumpsys wifi | grep mCurrentSoftApInfoMap"
+effective_status_pattern = "frequency= 5"
+
+# 前置条件：可选，不满足时 UI 禁用并提示 requires_hint
+requires_command = "dumpsys wifi | grep softApEnabled"
+requires_pattern = "softApEnabled=true"
+requires_hint = "需先开启热点，该设置才会生效"
+
+# opt-in 自动补救：留空则前置不满足时仅提示
+auto_prereq_command = ""
+
+[[mods]]
+id = "stay-awake-charging"
+type = "shell_toggle"
+enabled = true
+title = "充电时保持唤醒"
+description = "插电或 USB 连接时屏幕保持常亮，方便调试与车载导航。"
+aliases = ["keep awake", "stay awake", "屏幕常亮"]
+category = "display/stay-awake"
+on_command = "settings put global stay_on_while_plugged_in 7"
+off_command = "settings put global stay_on_while_plugged_in 0"
+applied_status_command = "settings get global stay_on_while_plugged_in"
+applied_status_pattern = "^[1-7]$"

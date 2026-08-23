@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use modspec_core::{validate_profile, validate_rule, Profile, RuleFile};
+use modspec_core::{profile_lint_warnings, validate_profile, validate_rule, Profile, RuleFile};
 
 pub fn validate_file(path: &str) -> Result<()> {
     if path.ends_with(".rule.toml") {
@@ -17,6 +17,9 @@ pub fn validate_profile_file(path: &str) -> Result<()> {
         profile.meta.id,
         profile.mods.len()
     );
+    for warning in profile_lint_warnings(&profile) {
+        println!("warning: {warning}");
+    }
     Ok(())
 }
 
