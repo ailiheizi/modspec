@@ -62,9 +62,7 @@ class LocalHttpServer(
     }
 
     private fun pair(session: IHTTPSession): Response {
-        val files = HashMap<String, String>()
-        session.parseBody(files)
-        val body = files["postData"].orEmpty()
+        val body = readBodyUtf8(session)
         if (body.isBlank()) {
             return newFixedLengthResponse(
                 Response.Status.BAD_REQUEST,
@@ -92,14 +90,44 @@ class LocalHttpServer(
                 """{"error":"pairing token required"}""",
             )
         }
-        val files = HashMap<String, String>()
-        session.parseBody(files)
-        val body = files["postData"].orEmpty()
+        val body = readBodyUtf8(session)
         val response = if (body.isBlank()) {
             """{"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"}}"""
         } else {
             rpcHandler.handleRequest(body)
         }
         return newFixedLengthResponse(Response.Status.OK, "application/json", response)
+    }
+
+    /**
+     * Read the raw request body and decode it as UTF-8.
+     *
+     * NanoHTTPD's `parseBody` decodes POST bodies with `ContentType.getEncoding()`,
+     * which defaults to `US-ASCII` when the client omits `charset` from
+     * `Content-Type` (our Rust client sends plain `application/json`). That mangles
+     * any non-ASCII UTF-8 payload (e.g. `title = "5GHz 热点"` becomes `5GHz ?????`).
+     * Bypass `parseBody` and read the body bytes directly from the session input
+     * stream, then decode as UTF-8. The response path is unaffected: NanoHTTPD
+     * falls back to UTF-8 automatically when ASCII cannot encode the payload.
+     */
+    private fun readBodyUtf8(session: IHTTPSession): String {
+        val declared = session.headers["content-length"]?.toLongOrNull()
+        val bytes = if (declared != null && declared in 0..MAX_BODY_BYTES) {
+            val buffer = ByteArray(declared.toInt())
+            var offset = 0
+            while (offset < buffer.size) {
+                val read = session.inputStream.read(buffer, offset, buffer.size - offset)
+                if (read < 0) break
+                offset += read
+            }
+            buffer.copyOf(offset)
+        } else {
+            session.inputStream.readBytes()
+        }
+        return String(bytes, Charsets.UTF_8)
+    }
+
+    companion object {
+        private const val MAX_BODY_BYTES = 4 * 1024 * 1024L
     }
 }
