@@ -2,18 +2,9 @@
 <resources>
     <color name="bg_app">#F4F6F8</color>
     <color name="surface">#FFFFFF</color>
-    <color name="surface_muted">#EEF2F6</color>
     <color name="text_primary">#1A2332</color>
     <color name="text_secondary">#5C6B7A</color>
     <color name="text_tertiary">#8A97A6</color>
     <color name="accent">#0F766E</color>
-    <color name="accent_soft">#CCFBF1</color>
     <color name="divider">#D8E0E8</color>
-    <color name="status_ok">#15803D</color>
-    <color name="status_ok_bg">#DCFCE7</color>
-    <color name="status_warn">#B45309</color>
-    <color name="status_warn_bg">#FEF3C7</color>
-    <color name="status_fail">#B91C1C</color>
-    <color name="status_fail_bg">#FEE2E2</color>
-    <color name="pairing_code_bg">#0F766E</color>
 </resources>

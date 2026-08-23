@@ -1,79 +1,112 @@
 package com.modspec.agent
 
-import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.modspec.agent.ui.theme.ColorAccent
+import com.modspec.agent.ui.theme.ColorStatusFail
+import com.modspec.agent.ui.theme.ColorStatusFailBg
+import com.modspec.agent.ui.theme.ColorStatusOk
+import com.modspec.agent.ui.theme.ColorStatusOkBg
+import com.modspec.agent.ui.theme.ColorStatusWarn
+import com.modspec.agent.ui.theme.ColorStatusWarnBg
+import com.modspec.agent.ui.theme.ModspecTheme
 import io.github.libxposed.service.XposedService
 import java.security.SecureRandom
-import java.util.concurrent.Executors
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/**
- * Pairing UI + environment diagnostics + Hook 管家面板。
- */
-class MainActivity : Activity(), XposedServiceCoordinator.Listener {
+/** Port constants aligned with crates/modspec-protocol. */
+object RpcPorts {
+    const val HTTP = 8764
+    const val WS = 8765
+}
 
-    private val worker = Executors.newSingleThreadExecutor()
-    private lateinit var checksContainer: LinearLayout
-    private lateinit var progress: ProgressBar
-    private lateinit var summaryTitle: TextView
-    private lateinit var summaryDetail: TextView
-    private lateinit var summaryBadge: TextView
-    private lateinit var openLsposedButton: Button
-    private lateinit var hookServiceStatus: TextView
-    private lateinit var hookProfile: TextView
-    private lateinit var hookRulesList: LinearLayout
-    private lateinit var hookRulesEmpty: TextView
-    private lateinit var hookProcessList: LinearLayout
-    private lateinit var hookProcessEmpty: TextView
-    private lateinit var hookLogTail: TextView
-    private lateinit var hookPrimaryButton: Button
-    private lateinit var hookLogRefreshButton: Button
+class MainActivity : ComponentActivity(), XposedServiceCoordinator.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
         val code = savedInstanceState?.getString(STATE_PAIRING_CODE) ?: generatePairingCode()
+        MainActivity.pairingCode = code
         PairingStore.setPairingCode(this, code)
-        findViewById<TextView>(R.id.pairing_code).text = code
-        findViewById<TextView>(R.id.endpoint_http).text =
-            getString(R.string.endpoint_http_fmt, RpcPorts.HTTP)
-        findViewById<TextView>(R.id.endpoint_ws).text =
-            getString(R.string.endpoint_ws_fmt, RpcPorts.WS)
 
-        checksContainer = findViewById(R.id.env_checks)
-        progress = findViewById(R.id.env_progress)
-        summaryTitle = findViewById(R.id.env_summary_title)
-        summaryDetail = findViewById(R.id.env_summary_detail)
-        summaryBadge = findViewById(R.id.env_summary_badge)
-        openLsposedButton = findViewById(R.id.btn_open_lsposed)
-        hookServiceStatus = findViewById(R.id.hook_service_status)
-        hookProfile = findViewById(R.id.hook_profile)
-        hookRulesList = findViewById(R.id.hook_rules_list)
-        hookRulesEmpty = findViewById(R.id.hook_rules_empty)
-        hookProcessList = findViewById(R.id.hook_process_list)
-        hookProcessEmpty = findViewById(R.id.hook_process_empty)
-        hookLogTail = findViewById(R.id.hook_log_tail)
-        hookPrimaryButton = findViewById(R.id.btn_hook_primary)
-        hookLogRefreshButton = findViewById(R.id.btn_hook_log_refresh)
-
-        findViewById<Button>(R.id.env_refresh).setOnClickListener { refreshEnvironmentChecks() }
-        findViewById<Button>(R.id.btn_copy_pairing).setOnClickListener { copyPairingCode() }
-        openLsposedButton.setOnClickListener { openLsposedManager() }
-        hookPrimaryButton.setOnClickListener { runPrimaryAction() }
-        hookLogRefreshButton.setOnClickListener { refreshHookManager() }
+        setContent {
+            ModspecTheme {
+                AgentApp(
+                    activity = this@MainActivity,
+                    initialPairingCode = code,
+                )
+            }
+        }
 
         AgentService.start(this)
-        refreshHookManager()
     }
 
     override fun onStart() {
@@ -87,276 +120,14 @@ class MainActivity : Activity(), XposedServiceCoordinator.Listener {
     }
 
     override fun onStateChanged(state: XposedServiceCoordinator.State, service: XposedService?) {
-        runOnUiThread {
-            if (!isFinishing) {
-                refreshHookManager()
-                if (service != null) refreshEnvironmentChecks()
-            }
+        if (!isFinishing) {
+            MainActivity.signalRefresh(REFRESH_HOOK or REFRESH_ENV)
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshEnvironmentChecks()
-        refreshHookManager()
-    }
-
-    override fun onDestroy() {
-        worker.shutdownNow()
-        super.onDestroy()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putString(STATE_PAIRING_CODE, findViewById<TextView>(R.id.pairing_code).text.toString())
-    }
-
-    private fun refreshEnvironmentChecks() {
-        progress.visibility = View.VISIBLE
-        summaryTitle.setText(R.string.env_summary_loading)
-        summaryDetail.text = ""
-        worker.execute {
-            val report = EnvironmentChecker.run(this, forceRefresh = true)
-            runOnUiThread {
-                if (isFinishing) return@runOnUiThread
-                renderSummary(report)
-                renderChecks(report)
-                progress.visibility = View.GONE
-            }
-        }
-    }
-
-    private fun renderSummary(report: EnvironmentChecker.Report) {
-        val ok = report.items.count { it.status == EnvironmentChecker.Status.OK }
-        val warn = report.items.count { it.status == EnvironmentChecker.Status.WARN }
-        val fail = report.items.count { it.status == EnvironmentChecker.Status.FAIL }
-        val scopeItem = report.items.firstOrNull { it.id == "module_scope" }
-        val hasScopeIssue = scopeItem?.status == EnvironmentChecker.Status.FAIL ||
-            (scopeItem?.status == EnvironmentChecker.Status.WARN &&
-                scopeItem.detail.contains("规则目标还需"))
-        val hasBlocking = fail > 0
-
-        when {
-            hasBlocking -> {
-                summaryTitle.setText(R.string.env_summary_blocked)
-                summaryBadge.setText(R.string.env_badge_fail)
-                summaryBadge.setBackgroundResource(R.drawable.bg_badge_fail)
-                summaryBadge.setTextColor(getColor(R.color.status_fail))
-            }
-            hasScopeIssue -> {
-                summaryTitle.setText(R.string.env_summary_scope)
-                summaryBadge.setText(R.string.env_badge_warn)
-                summaryBadge.setBackgroundResource(R.drawable.bg_badge_warn)
-                summaryBadge.setTextColor(getColor(R.color.status_warn))
-            }
-            else -> {
-                summaryTitle.setText(R.string.env_summary_ready)
-                summaryBadge.setText(R.string.env_badge_ok)
-                summaryBadge.setBackgroundResource(R.drawable.bg_badge_ok)
-                summaryBadge.setTextColor(getColor(R.color.status_ok))
-            }
-        }
-
-        summaryDetail.text = getString(R.string.env_summary_counts, ok, warn, fail)
-        openLsposedButton.visibility =
-            if (hasScopeIssue) View.VISIBLE else View.GONE
-    }
-
-    private fun renderChecks(report: EnvironmentChecker.Report) {
-        checksContainer.removeAllViews()
-        val inflater = LayoutInflater.from(this)
-        report.items.forEach { item ->
-            val row = inflater.inflate(R.layout.item_env_check, checksContainer, false)
-            bindCheckRow(row, item)
-            checksContainer.addView(row)
-        }
-    }
-
-    private fun bindCheckRow(row: View, item: EnvironmentChecker.Item) {
-        val root = row.findViewById<LinearLayout>(R.id.env_item_root)
-        val badge = row.findViewById<TextView>(R.id.env_badge)
-        val whyView = row.findViewById<TextView>(R.id.env_why)
-        val hintView = row.findViewById<TextView>(R.id.env_hint)
-
-        row.findViewById<TextView>(R.id.env_title).text = item.title
-        row.findViewById<TextView>(R.id.env_detail).text = item.detail
-
-        when (item.status) {
-            EnvironmentChecker.Status.OK -> {
-                root.setBackgroundResource(R.drawable.bg_env_strip_ok)
-                badge.setText(R.string.env_item_ok)
-                badge.setBackgroundResource(R.drawable.bg_badge_ok)
-                badge.setTextColor(getColor(R.color.status_ok))
-                whyView.visibility = View.GONE
-                hintView.visibility = View.GONE
-            }
-            EnvironmentChecker.Status.WARN -> {
-                root.setBackgroundResource(R.drawable.bg_env_strip_warn)
-                badge.setText(R.string.env_item_warn)
-                badge.setBackgroundResource(R.drawable.bg_badge_warn)
-                badge.setTextColor(getColor(R.color.status_warn))
-                whyView.visibility = View.VISIBLE
-                whyView.text = item.why
-                if (item.hint.isNullOrBlank()) {
-                    hintView.visibility = View.GONE
-                } else {
-                    hintView.visibility = View.VISIBLE
-                    hintView.text = item.hint
-                }
-            }
-            EnvironmentChecker.Status.FAIL -> {
-                root.setBackgroundResource(R.drawable.bg_env_strip_fail)
-                badge.setText(R.string.env_item_fail)
-                badge.setBackgroundResource(R.drawable.bg_badge_fail)
-                badge.setTextColor(getColor(R.color.status_fail))
-                whyView.visibility = View.VISIBLE
-                whyView.text = item.why
-                if (item.hint.isNullOrBlank()) {
-                    hintView.visibility = View.GONE
-                } else {
-                    hintView.visibility = View.VISIBLE
-                    hintView.text = item.hint
-                }
-            }
-        }
-    }
-
-    private fun copyPairingCode() {
-        val code = findViewById<TextView>(R.id.pairing_code).text.toString()
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("pairing_code", code))
-        Toast.makeText(this, R.string.pairing_copied, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun refreshHookManager() {
-        worker.execute {
-            val snapshot = HookPanelLoader.load(this)
-            runOnUiThread {
-                if (isFinishing) return@runOnUiThread
-                renderHookManager(snapshot)
-            }
-        }
-    }
-
-    private fun renderHookManager(snapshot: HookPanelSnapshot) {
-        hookServiceStatus.text = snapshot.serviceLabel
-        hookProfile.text = if (snapshot.activeProfileId.isNullOrBlank()) {
-            getString(R.string.hook_active_profile_none)
-        } else {
-            getString(R.string.hook_active_profile_fmt, snapshot.activeProfileId)
-        }
-
-        val inflater = LayoutInflater.from(this)
-        hookRulesList.removeAllViews()
-        if (snapshot.deployedRules.isEmpty()) {
-            hookRulesEmpty.visibility = View.VISIBLE
-        } else {
-            hookRulesEmpty.visibility = View.GONE
-            snapshot.deployedRules.forEach { rule ->
-                val row = inflater.inflate(R.layout.item_hook_rule, hookRulesList, false)
-                row.findViewById<TextView>(R.id.hook_rule_name).text = rule.displayName
-                val badge = row.findViewById<TextView>(R.id.hook_rule_badge)
-                if (rule.inActiveProfile) {
-                    badge.setText(R.string.hook_rule_active)
-                    badge.setBackgroundResource(R.drawable.bg_badge_ok)
-                    badge.setTextColor(getColor(R.color.status_ok))
-                } else {
-                    badge.setText(R.string.hook_rule_idle)
-                    badge.setBackgroundResource(R.drawable.bg_badge_warn)
-                    badge.setTextColor(getColor(R.color.status_warn))
-                }
-                row.findViewById<TextView>(R.id.hook_rule_packages).text =
-                    getString(R.string.hook_rule_packages_fmt, rule.packages.joinToString(", "))
-                row.findViewById<TextView>(R.id.hook_rule_meta).text =
-                    getString(R.string.hook_rule_meta_fmt, rule.hookCount, rule.updatedAt)
-                hookRulesList.addView(row)
-            }
-        }
-
-        hookProcessList.removeAllViews()
-        if (snapshot.runningProcesses.isEmpty()) {
-            hookProcessEmpty.visibility = View.VISIBLE
-        } else {
-            hookProcessEmpty.visibility = View.GONE
-            snapshot.runningProcesses.forEach { proc ->
-                val row = inflater.inflate(R.layout.item_hook_process, hookProcessList, false)
-                row.findViewById<TextView>(R.id.hook_process_name).text = proc.processName
-                row.findViewById<TextView>(R.id.hook_process_uid).text =
-                    proc.uid?.let { getString(R.string.hook_process_uid_fmt, it) } ?: ""
-                hookProcessList.addView(row)
-            }
-        }
-
-        hookLogTail.text = if (snapshot.logLines.isEmpty()) {
-            getString(R.string.hook_log_empty)
-        } else {
-            snapshot.logLines.joinToString("\n")
-        }
-
-        when (snapshot.primaryAction) {
-            PrimaryAction.SOFT_RESTART -> {
-                hookPrimaryButton.isEnabled = true
-                hookPrimaryButton.setText(R.string.btn_hook_primary_restart)
-            }
-            PrimaryAction.RULES_ONLY -> {
-                hookPrimaryButton.isEnabled = true
-                hookPrimaryButton.setText(R.string.btn_hook_primary_rules)
-            }
-            PrimaryAction.DISABLED -> {
-                hookPrimaryButton.isEnabled = false
-                hookPrimaryButton.setText(R.string.btn_hook_primary_disabled)
-            }
-        }
-    }
-
-    private fun runPrimaryAction() {
-        val snapshot = HookPanelLoader.load(this)
-        when (snapshot.primaryAction) {
-            PrimaryAction.SOFT_RESTART -> runHookAction(rulesOnly = false)
-            PrimaryAction.RULES_ONLY -> runHookAction(rulesOnly = true)
-            PrimaryAction.DISABLED -> {
-                Toast.makeText(this, R.string.hook_restart_need_service, Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    private fun runHookAction(rulesOnly: Boolean) {
-        if (!rulesOnly && ModspecApp.xposedService == null) {
-            Toast.makeText(this, R.string.hook_restart_need_service, Toast.LENGTH_LONG).show()
-            return
-        }
-        if (rulesOnly && !ShellRunner.canSu() && ModspecApp.xposedService == null) {
-            Toast.makeText(this, R.string.hook_reload_need_root, Toast.LENGTH_LONG).show()
-            return
-        }
-        hookPrimaryButton.isEnabled = false
-        hookPrimaryButton.setText(R.string.hook_restart_running)
-        worker.execute {
-            val result = if (rulesOnly) {
-                ModuleReloader.reloadRules(this)
-            } else {
-                ModuleReloader.softRestart(this)
-            }
-            runOnUiThread {
-                if (isFinishing) return@runOnUiThread
-                refreshHookManager()
-                Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    private fun openLsposedManager() {
-        val packages = listOf("org.lsposed.manager", "io.github.lsposed.manager")
-        val intent = packages.firstNotNullOfOrNull { pkg ->
-            packageManager.getLaunchIntentForPackage(pkg)?.apply {
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        }
-        if (intent != null) {
-            startActivity(intent)
-        } else {
-            Toast.makeText(this, R.string.lsposed_manager_not_found, Toast.LENGTH_SHORT).show()
-        }
+        outState.putString(STATE_PAIRING_CODE, MainActivity.pairingCode)
     }
 
     private fun generatePairingCode(): String =
@@ -364,11 +135,1067 @@ class MainActivity : Activity(), XposedServiceCoordinator.Listener {
 
     companion object {
         private const val STATE_PAIRING_CODE = "pairing_code"
+        private const val REFRESH_HOOK = 1
+        private const val REFRESH_ENV = 2
+        private val pendingRefresh = java.util.concurrent.atomic.AtomicInteger(0)
+
+        @Volatile
+        var pairingCode: String = ""
+            private set
+
+        fun signalRefresh(flags: Int) {
+            pendingRefresh.getAndUpdate { it or flags }
+        }
+
+        fun consumeRefresh(): Int = pendingRefresh.getAndSet(0)
+
+        val REFRESH_HOOK_VALUE = REFRESH_HOOK
+        val REFRESH_ENV_VALUE = REFRESH_ENV
     }
 }
 
-/** Port constants aligned with crates/modspec-protocol. */
-object RpcPorts {
-    const val HTTP = 8764
-    const val WS = 8765
+private data class TopLevelTab(
+    val label: String,
+    val icon: ImageVector,
+)
+
+private val topTabs = listOf(
+    TopLevelTab("快捷开关", Icons.Filled.Home),
+    TopLevelTab("Hook 管理", Icons.Filled.Science),
+    TopLevelTab("环境", Icons.Filled.AdminPanelSettings),
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AgentApp(
+    activity: MainActivity,
+    initialPairingCode: String,
+) {
+    val context = LocalContext.current
+    var selectedTab by remember { mutableStateOf(0) }
+    var pairingCode by remember { mutableStateOf(initialPairingCode) }
+    var envLoading by remember { mutableStateOf(false) }
+    var envReport by remember { mutableStateOf<EnvironmentChecker.Report?>(null) }
+    var hookLoading by remember { mutableStateOf(false) }
+    var hookSnapshot by remember { mutableStateOf<HookPanelSnapshot?>(null) }
+    var togglesLoading by remember { mutableStateOf(false) }
+    var toggles by remember { mutableStateOf<List<ShellToggleRow>>(emptyList()) }
+    var primaryRunning by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+
+    fun refreshEnvironment() {
+        envLoading = true
+        scope.launch {
+            val report = withContext(Dispatchers.IO) {
+                EnvironmentChecker.run(activity, forceRefresh = true)
+            }
+            envReport = report
+            envLoading = false
+        }
+    }
+
+    fun refreshHookManager() {
+        hookLoading = true
+        scope.launch {
+            val snapshot = withContext(Dispatchers.IO) {
+                HookPanelLoader.load(activity)
+            }
+            hookSnapshot = snapshot
+            toggles = snapshot.shellToggles
+            togglesLoading = false
+            hookLoading = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshEnvironment()
+        refreshHookManager()
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(3000)
+            val pending = MainActivity.consumeRefresh()
+            if (pending and MainActivity.Companion.REFRESH_HOOK_VALUE != 0) refreshHookManager()
+            if (pending and MainActivity.Companion.REFRESH_ENV_VALUE != 0) refreshEnvironment()
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Text(topTabs[selectedTab].label, fontWeight = FontWeight.Bold)
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+            )
+        },
+        bottomBar = {
+            NavigationBar {
+                topTabs.forEachIndexed { index, tab ->
+                    NavigationBarItem(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                        label = { Text(tab.label) },
+                    )
+                }
+            }
+        },
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            Crossfade(targetState = selectedTab, label = "tab") { tab ->
+                when (tab) {
+                    0 -> ShortcutsPage(
+                        toggles = toggles,
+                        loading = togglesLoading,
+                        onToggleChanged = { toggle, enable ->
+                            onShellToggleChanged(context, activity, toggle, enable, ::refreshHookManager)
+                        },
+                    )
+                    1 -> HookPage(
+                        snapshot = hookSnapshot,
+                        loading = hookLoading,
+                        primaryRunning = primaryRunning,
+                        onPrimaryClick = {
+                            if (!primaryRunning) {
+                                primaryRunning = true
+                                runPrimaryAction(context, activity) { primaryRunning = false }
+                            }
+                        },
+                        onLogRefresh = ::refreshHookManager,
+                    )
+                    2 -> EnvPage(
+                        report = envReport,
+                        loading = envLoading,
+                        pairingCode = pairingCode,
+                        onRefresh = ::refreshEnvironment,
+                        onCopyPairing = {
+                            copyPairingCode(context, pairingCode)
+                        },
+                        onOpenLsposed = { openLsposedManager(context) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShortcutsPage(
+    toggles: List<ShellToggleRow>,
+    loading: Boolean,
+    onToggleChanged: (ShellToggleRow, Boolean) -> Unit,
+) {
+    LazyColumn(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            SectionHeader(
+                title = "快捷开关",
+                subtitle = "由 profile 声明的 shell 开关，独立于 Hook 规则",
+            )
+        }
+        if (loading && toggles.isEmpty()) {
+            item {
+                LoadingRow()
+            }
+        } else if (toggles.isEmpty()) {
+            item {
+                EmptyState("暂无已声明的快捷开关，请在 profile 中添加 shell_toggle mod")
+            }
+        } else {
+            items(toggles, key = { it.id }) { toggle ->
+                ToggleCard(
+                    toggle = toggle,
+                    onToggleChanged = { checked -> onToggleChanged(toggle, checked) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToggleCard(
+    toggle: ShellToggleRow,
+    onToggleChanged: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = toggle.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (toggle.statusCommand != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = if (toggle.currentStatus) "当前状态：开启" else "当前状态：关闭",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Switch(
+                checked = toggle.currentStatus,
+                onCheckedChange = onToggleChanged,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HookPage(
+    snapshot: HookPanelSnapshot?,
+    loading: Boolean,
+    primaryRunning: Boolean,
+    onPrimaryClick: () -> Unit,
+    onLogRefresh: () -> Unit,
+) {
+    LazyColumn(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            SectionHeader(
+                title = "Hook 管理",
+                subtitle = "查看已部署规则、运行进程与日志；一键软重启让 Hook 生效",
+            )
+        }
+        if (loading && snapshot == null) {
+            item { LoadingRow() }
+        } else if (snapshot != null) {
+            val running = primaryRunning
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "模块状态",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        StatusChip(
+                            text = snapshot.serviceLabel,
+                            color = if (snapshot.serviceConnected) ColorStatusOk else ColorStatusWarn,
+                        )
+                        Text(
+                            text = if (snapshot.activeProfileId.isNullOrBlank()) {
+                                "当前无已应用 profile"
+                            } else {
+                                "当前 profile：${snapshot.activeProfileId}"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Button(
+                            onClick = onPrimaryClick,
+                            enabled = !running && snapshot.primaryAction != PrimaryAction.DISABLED,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                Icons.Filled.PowerSettingsNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                when (snapshot.primaryAction) {
+                                    PrimaryAction.SOFT_RESTART -> "软重启模块"
+                                    PrimaryAction.RULES_ONLY -> "同步规则并重载"
+                                    PrimaryAction.DISABLED -> "等待 LSPosed 连接"
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                RuleSection(snapshot)
+            }
+
+            item {
+                ProcessSection(snapshot)
+            }
+
+            item {
+                LogSection(
+                    logLines = snapshot.logLines,
+                    onRefresh = onLogRefresh,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RuleSection(snapshot: HookPanelSnapshot) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "已部署规则",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(8.dp))
+            if (snapshot.deployedRules.isEmpty()) {
+                EmptyInline("暂无规则文件，请通过 CLI apply profile")
+            } else {
+                snapshot.deployedRules.forEach { rule ->
+                    RuleCard(rule)
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RuleCard(rule: DeployedRuleRow) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = rule.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                StatusBadge(
+                    text = if (rule.inActiveProfile) "生效中" else "未激活",
+                    color = if (rule.inActiveProfile) ColorStatusOk else ColorStatusWarn,
+                    container = if (rule.inActiveProfile) ColorStatusOkBg else ColorStatusWarnBg,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "目标：${rule.packages.joinToString(", ")}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "${rule.hookCount} 个 hook · 更新于 ${rule.updatedAt}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProcessSection(snapshot: HookPanelSnapshot) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "运行中的 Hook 进程",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(8.dp))
+            if (snapshot.runningProcesses.isEmpty()) {
+                EmptyInline("暂无运行中的 Hook 进程")
+            } else {
+                snapshot.runningProcesses.forEach { proc ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = proc.processName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(1f),
+                        )
+                        proc.uid?.let {
+                            Text(
+                                text = "uid $it",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogSection(
+    logLines: List<String>,
+    onRefresh: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "最近日志",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(
+                    onClick = onRefresh,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("刷新")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (logLines.isEmpty()) {
+                EmptyInline("暂无 Modspec 相关日志")
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(10.dp),
+                ) {
+                    logLines.forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnvPage(
+    report: EnvironmentChecker.Report?,
+    loading: Boolean,
+    pairingCode: String,
+    onRefresh: () -> Unit,
+    onCopyPairing: () -> Unit,
+    onOpenLsposed: () -> Unit,
+) {
+    LazyColumn(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            SectionHeader(
+                title = "环境检查",
+                subtitle = "决定 profile 各 mod 能否生效",
+            )
+        }
+        if (loading && report == null) {
+            item { LoadingRow() }
+        } else if (report != null) {
+            val ok = report.items.count { it.status == EnvironmentChecker.Status.OK }
+            val warn = report.items.count { it.status == EnvironmentChecker.Status.WARN }
+            val fail = report.items.count { it.status == EnvironmentChecker.Status.FAIL }
+            val scopeItem = report.items.firstOrNull { it.id == "module_scope" }
+            val hasScopeIssue = scopeItem?.status == EnvironmentChecker.Status.FAIL ||
+                (scopeItem?.status == EnvironmentChecker.Status.WARN &&
+                    scopeItem.detail.contains("规则目标还需"))
+            val hasBlocking = fail > 0
+
+            item {
+                EnvSummaryCard(
+                    report = report,
+                    ok = ok,
+                    warn = warn,
+                    fail = fail,
+                    hasScopeIssue = hasScopeIssue,
+                    hasBlocking = hasBlocking,
+                    onOpenLsposed = onOpenLsposed,
+                    loading = loading,
+                )
+            }
+
+            item {
+                PairingCard(
+                    pairingCode = pairingCode,
+                    onCopy = onCopyPairing,
+                )
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "逐项检查",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = "决定 profile 各 mod 能否生效",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onRefresh,
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text("刷新")
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        report.items.forEach { item ->
+                            EnvCheckCard(item)
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnvSummaryCard(
+    report: EnvironmentChecker.Report,
+    ok: Int,
+    warn: Int,
+    fail: Int,
+    hasScopeIssue: Boolean,
+    hasBlocking: Boolean,
+    onOpenLsposed: () -> Unit,
+    loading: Boolean,
+) {
+    val title: String
+    val badgeText: String
+    val badgeColor: Color
+    val badgeContainer: Color
+    when {
+        hasBlocking -> {
+            title = "有阻塞项待处理"
+            badgeText = "阻塞"
+            badgeColor = ColorStatusFail
+            badgeContainer = ColorStatusFailBg
+        }
+        hasScopeIssue -> {
+            title = "还需配置 Hook 作用域"
+            badgeText = "注意"
+            badgeColor = ColorStatusWarn
+            badgeContainer = ColorStatusWarnBg
+        }
+        else -> {
+            title = "可以联调"
+            badgeText = "就绪"
+            badgeColor = ColorStatusOk
+            badgeContainer = ColorStatusOkBg
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    StatusBadge(
+                        text = badgeText,
+                        color = badgeColor,
+                        container = badgeContainer,
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "$ok 项通过 · $warn 项注意 · $fail 项失败",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (hasScopeIssue) {
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onOpenLsposed,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("打开 LSPosed 配置作用域")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairingCard(
+    pairingCode: String,
+    onCopy: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "PC 配对",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "在 PC 端执行 modspec-cli pair scan，输入下方 6 位码完成信任",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(ColorAccent, RoundedCornerShape(16.dp))
+                    .padding(vertical = 18.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = pairingCode,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 4.sp,
+                    ),
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = onCopy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentWidth(Alignment.CenterHorizontally),
+            ) {
+                Icon(
+                    Icons.Filled.ContentCopy,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("复制配对码")
+            }
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "局域网端点",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(6.dp))
+            EndpointRow("http://<手机IP>:8764/health")
+            Spacer(Modifier.height(8.dp))
+            EndpointRow("ws://<手机IP>:8765/rpc")
+        }
+    }
+}
+
+@Composable
+private fun EndpointRow(text: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+            .padding(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Filled.Language,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EnvCheckCard(item: EnvironmentChecker.Item) {
+    val (color, container) = when (item.status) {
+        EnvironmentChecker.Status.OK -> ColorStatusOk to ColorStatusOkBg
+        EnvironmentChecker.Status.WARN -> ColorStatusWarn to ColorStatusWarnBg
+        EnvironmentChecker.Status.FAIL -> ColorStatusFail to ColorStatusFailBg
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = container.copy(alpha = 0.4f),
+        ),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                StatusBadge(
+                    text = when (item.status) {
+                        EnvironmentChecker.Status.OK -> "通过"
+                        EnvironmentChecker.Status.WARN -> "注意"
+                        EnvironmentChecker.Status.FAIL -> "失败"
+                    },
+                    color = color,
+                    container = container,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = item.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (item.status != EnvironmentChecker.Status.OK) {
+                item.why.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                item.hint?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    subtitle: String,
+) {
+    Column {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+        )
+    }
+}
+
+@Composable
+private fun LoadingRow() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(28.dp))
+    }
+}
+
+@Composable
+private fun EmptyState(text: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun EmptyInline(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun StatusBadge(
+    text: String,
+    color: Color,
+    container: Color,
+) {
+    Box(
+        modifier = Modifier
+            .background(container, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = text,
+            color = color,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun StatusChip(
+    text: String,
+    color: Color,
+) {
+    Box(
+        modifier = Modifier
+            .background(
+                color.copy(alpha = 0.15f),
+                RoundedCornerShape(6.dp),
+            )
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = text,
+            color = color,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+private fun onShellToggleChanged(
+    context: Context,
+    activity: MainActivity,
+    toggle: ShellToggleRow,
+    enable: Boolean,
+    onRefresh: () -> Unit,
+) {
+    if (!ShellRunner.canSu()) {
+        Toast.makeText(context, "需要 root 权限", Toast.LENGTH_LONG).show()
+        onRefresh()
+        return
+    }
+    val command = if (enable) toggle.onCommand else toggle.offCommand
+    if (command.isBlank()) {
+        Toast.makeText(context, "该开关未配置命令", Toast.LENGTH_LONG).show()
+        onRefresh()
+        return
+    }
+    CoroutineScope(Dispatchers.IO).launch {
+        val result = ShellRunner.runSu(command)
+        withContext(Dispatchers.Main) {
+            if (result.isSuccess) {
+                persistShellToggleState(context, toggle.id, enable)
+            } else {
+                val error = result.exceptionOrNull()?.message ?: "unknown"
+                Toast.makeText(
+                    context,
+                    "执行失败：$error",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+            onRefresh()
+        }
+    }
+}
+
+private fun persistShellToggleState(context: Context, modId: String, on: Boolean) {
+    val state = AgentStorage.readState(context)
+    val toggles = state.optJSONObject("shell_toggle_state") ?: org.json.JSONObject()
+    toggles.put(modId, on)
+    state.put("shell_toggle_state", toggles)
+    AgentStorage.writeState(context, state)
+}
+
+private fun runPrimaryAction(
+    context: Context,
+    activity: MainActivity,
+    onDone: () -> Unit,
+) {
+    val snapshot = HookPanelLoader.load(context)
+    when (snapshot.primaryAction) {
+        PrimaryAction.SOFT_RESTART -> runHookAction(context, rulesOnly = false, onDone = onDone)
+        PrimaryAction.RULES_ONLY -> runHookAction(context, rulesOnly = true, onDone = onDone)
+        PrimaryAction.DISABLED -> {
+            Toast.makeText(context, "请先启用模块并打开本 App 绑定 XposedService", Toast.LENGTH_LONG).show()
+            onDone()
+        }
+    }
+}
+
+private fun runHookAction(
+    context: Context,
+    rulesOnly: Boolean,
+    onDone: () -> Unit,
+) {
+    if (!rulesOnly && ModspecApp.xposedService == null) {
+        Toast.makeText(context, "请先启用模块并打开本 App 绑定 XposedService", Toast.LENGTH_LONG).show()
+        onDone()
+        return
+    }
+    if (rulesOnly && !ShellRunner.canSu() && ModspecApp.xposedService == null) {
+        Toast.makeText(context, "需要 root 或 XposedService 才能同步规则", Toast.LENGTH_LONG).show()
+        onDone()
+        return
+    }
+    CoroutineScope(Dispatchers.IO).launch {
+        val result = if (rulesOnly) {
+            ModuleReloader.reloadRules(context)
+        } else {
+            ModuleReloader.softRestart(context)
+        }
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            onDone()
+        }
+    }
+}
+
+private fun copyPairingCode(context: Context, code: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("pairing_code", code))
+    Toast.makeText(context, "配对码已复制", Toast.LENGTH_SHORT).show()
+}
+
+private fun openLsposedManager(context: Context) {
+    val packages = listOf("org.lsposed.manager", "io.github.lsposed.manager")
+    val intent = packages.firstNotNullOfOrNull { pkg ->
+        context.packageManager.getLaunchIntentForPackage(pkg)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+    if (intent != null) {
+        context.startActivity(intent)
+    } else {
+        Toast.makeText(context, "未找到 LSPosed Manager", Toast.LENGTH_SHORT).show()
+    }
 }
