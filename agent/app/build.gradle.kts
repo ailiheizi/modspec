@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -42,10 +43,6 @@ android {
         compose = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
-
     packaging {
         resources {
             merges += "META-INF/xposed/*"
@@ -68,6 +65,11 @@ dependencies {
     // Rhino: MPL-2.0; LuaJ: MIT (see THIRD_PARTY_NOTICES).
     implementation("org.mozilla:rhino:1.7.15")
     implementation("org.luaj:luaj-jse:3.0.1")
+
+    // On-device sentence embeddings (semantic search, Apache-2.0).
+    // ONNX Runtime (MIT) + Rust HF-tokenizer port; model files are downloaded
+    // at runtime to filesDir, not bundled in the APK.
+    implementation("io.gitlab.shubham0204:sentence-embeddings:0.0.6")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(composeBom)

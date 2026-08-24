@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandMore
@@ -51,6 +52,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -62,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,6 +84,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.modspec.agent.search.IndexableToggle
+import com.modspec.agent.search.SemanticSearchManager
 import com.modspec.agent.ui.theme.ColorAccent
 import com.modspec.agent.ui.theme.ColorStatusFail
 import com.modspec.agent.ui.theme.ColorStatusFailBg
@@ -335,15 +340,74 @@ private fun ShortcutsPage(
     loading: Boolean,
     onToggleChanged: (ShellToggleRow, Boolean) -> Unit,
 ) {
+    val context = LocalContext.current
     var query by rememberSaveable { mutableStateOf("") }
     // 折叠状态会话内记忆（rememberSaveable）；默认全展开
     var collapsedGroups by rememberSaveable { mutableStateOf(emptySet<String>()) }
 
-    val filtered = remember(toggles, query) {
-        val q = query.trim()
-        if (q.isEmpty()) toggles else toggles.filter { it.matchesQuery(q) }
+    // ---- 端侧语义搜索（模型就绪后自动启用；不可用时回退纯关键词）----
+    val semanticState by SemanticSearchManager.state.collectAsState()
+    val semanticReady = semanticState is SemanticSearchManager.Status.Ready
+
+    LaunchedEffect(Unit) { SemanticSearchManager.ensureReady(context) }
+
+    // toggles 变化或引擎刚就绪时增量重建索引（text_hash 未变不重复 embed）
+    LaunchedEffect(toggles.size, toggles.hashCode(), semanticReady) {
+        if (semanticReady && toggles.isNotEmpty()) {
+            SemanticSearchManager.reindex(
+                context,
+                toggles.map {
+                    IndexableToggle(
+                        id = it.id,
+                        title = it.title,
+                        description = it.description,
+                        aliases = it.aliases,
+                        categoryTitles = it.categoryTitles,
+                    )
+                },
+            )
+        }
     }
-    val groups = remember(filtered) { groupToggles(filtered) }
+
+    // 语义命中：300ms debounce 后查询（关键词过滤仍是即时的）
+    var semanticHits by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
+    LaunchedEffect(query, semanticReady) {
+        val q = query.trim()
+        if (q.isEmpty() || !semanticReady) {
+            if (q.isEmpty()) semanticHits = emptyMap()
+            return@LaunchedEffect
+        }
+        kotlinx.coroutines.delay(300)
+        semanticHits = SemanticSearchManager.search(q) ?: emptyMap()
+    }
+
+    val searching = query.isNotBlank()
+    // 搜索态：平铺相关度排序（关键词命中在前保持原序，语义命中按分数在后）
+    val keywordHitIds = remember(toggles, query) {
+        val q = query.trim()
+        if (q.isEmpty()) emptySet() else toggles.filter { it.matchesQuery(q) }.map { it.id }.toSet()
+    }
+    val rankedToggles = remember(toggles, keywordHitIds, semanticHits) {
+        if (!searching) {
+            toggles
+        } else {
+            val byId = toggles.associateBy { it.id }
+            val keywordOrdered = toggles.filter { it.id in keywordHitIds }
+            val semanticOnly = semanticHits.entries
+                .filter { it.key !in keywordHitIds }
+                .sortedByDescending { it.value }
+                .mapNotNull { byId[it.key] }
+            keywordOrdered + semanticOnly
+        }
+    }
+    val semanticScores = remember(keywordHitIds, semanticHits) {
+        semanticHits.filterKeys { it !in keywordHitIds }
+    }
+    val groups = remember(rankedToggles, searching) {
+        if (searching || rankedToggles.isEmpty()) emptyList() else groupToggles(rankedToggles)
+    }
+    fun scoreOf(toggle: ShellToggleRow): Float? =
+        if (searching && toggle.id !in keywordHitIds) semanticScores[toggle.id] else null
 
     LazyColumn(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -361,7 +425,7 @@ private fun ShortcutsPage(
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                placeholder = { Text("搜索开关（标题 / 描述 / 别名）") },
+                placeholder = { Text("搜索开关（标题 / 描述 / 别名 / 语义）") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -372,6 +436,9 @@ private fun ShortcutsPage(
                 },
             )
         }
+        item { SemanticStatusBanner(state = semanticState, onAction = {
+            SemanticSearchManager.downloadModel(context)
+        }) }
         when {
             loading && toggles.isEmpty() -> {
                 item { LoadingRow() }
@@ -381,8 +448,17 @@ private fun ShortcutsPage(
                     EmptyState("暂无已声明的快捷开关，请在 profile 中添加 shell_toggle mod")
                 }
             }
-            filtered.isEmpty() -> {
-                item { EmptyState("无匹配开关") }
+            rankedToggles.isEmpty() -> {
+                item { EmptyState("无匹配开关（关键词与语义均未命中）") }
+            }
+            searching -> {
+                items(rankedToggles, key = { it.id }) { toggle ->
+                    ToggleCard(
+                        toggle = toggle,
+                        onToggleChanged = { checked -> onToggleChanged(toggle, checked) },
+                        semanticScore = scoreOf(toggle),
+                    )
+                }
             }
             groups.size == 1 -> {
                 // 只有一组：隐藏分组头完全平铺（与无分组时一致）
@@ -413,6 +489,93 @@ private fun ShortcutsPage(
                 }
             }
         }
+    }
+}
+
+/** 语义搜索状态条：需要下载 / 下载中 / 失败可重试 / 索引更新中；就绪且无索引动作时不占位。 */
+@Composable
+private fun SemanticStatusBanner(
+    state: SemanticSearchManager.Status,
+    onAction: () -> Unit,
+) {
+    when (state) {
+        is SemanticSearchManager.Status.NeedsDownload -> {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "语义搜索需一次性下载模型（约 ${state.sizeMb} MB），之后完全离线可用",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = onAction, modifier = Modifier.fillMaxWidth()) {
+                        Text("下载语义模型")
+                    }
+                }
+            }
+        }
+        is SemanticSearchManager.Status.Downloading -> {
+            val fraction = if (state.totalBytes > 0) {
+                (state.downloadedBytes.toFloat() / state.totalBytes).coerceIn(0f, 1f)
+            } else 0f
+            Column(modifier = Modifier.fillMaxWidth()) {
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "正在下载语义模型 ${state.downloadedBytes / (1 shl 20)} / " +
+                        "${(state.totalBytes + (1 shl 20) - 1) / (1 shl 20)} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        is SemanticSearchManager.Status.Failed -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = state.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ColorStatusFail,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = onAction,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 12.dp, vertical = 4.dp,
+                    ),
+                ) {
+                    Text("重试")
+                }
+            }
+        }
+        is SemanticSearchManager.Status.Ready -> {
+            if (state.indexing) {
+                Text(
+                    text = "语义索引更新中…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        SemanticSearchManager.Status.Checking -> {}
     }
 }
 
@@ -483,6 +646,7 @@ private fun ExpandableGroupCard(
 private fun ToggleCard(
     toggle: ShellToggleRow,
     onToggleChanged: (Boolean) -> Unit,
+    semanticScore: Float? = null,
 ) {
     val preconditionBlocked = toggle.preconditionMet == false
     val appliedUnknown = toggle.appliedStatus == null
@@ -546,6 +710,14 @@ private fun ToggleCard(
                             contentDescription = "前置条件未满足",
                             tint = ColorStatusWarn,
                             modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    semanticScore?.let { score ->
+                        Spacer(Modifier.width(6.dp))
+                        StatusBadge(
+                            text = "语义 ${(score * 100).toInt()}%",
+                            color = ColorAccent,
+                            container = ColorAccent.copy(alpha = 0.15f),
                         )
                     }
                 }
