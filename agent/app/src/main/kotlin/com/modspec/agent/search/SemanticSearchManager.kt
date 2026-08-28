@@ -4,10 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.ml.shubham0204.sentence_embeddings.SentenceEmbedding
 import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,9 +24,10 @@ data class IndexableToggle(
 )
 
 /**
- * 端侧语义搜索：Xenova/paraphrase-multilingual-MiniLM-L12-v2（int8 量化 ONNX，384 维，
- * 中英双语 50+ 语言，XLM-Roberta Unigram tokenizer）。
- * - 模型文件运行时下载到 filesDir/embeddings/model/（不进 APK），下载后完全离线。
+ * 端侧语义搜索：BAAI/bge-small-zh-v1.5（int8 量化 ONNX，384 维，中英双语，
+ * XLM-Roberta Unigram tokenizer）。模型 22MB 随 APK assets 内置，首次使用时
+ * 拷贝到 filesDir 即可，零下载、完全离线。
+ *
  * - 引擎：shubham0204/Sentence-Embeddings-Android（ONNX Runtime + Rust HF tokenizer），
  *   last_hidden_state → attention-mask 加权 mean pooling → L2 归一化。
  * - 向量缓存 JSON 增量更新：text_hash 未变不重复 embed。
@@ -38,30 +35,17 @@ data class IndexableToggle(
 object SemanticSearchManager {
 
     private const val TAG = "SemanticSearch"
-    const val MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2-int8"
-    private const val HF_REPO = "Xenova/paraphrase-multilingual-MiniLM-L12-v2/resolve/main"
+    const val MODEL_NAME = "bge-small-zh-v1.5-int8"
     private const val MODEL_FILE = "model_quantized.onnx"
+    private const val TOKENIZER_FILE = "tokenizer.json"
 
-    // HF 主站优先，失败自动回退国内镜像 hf-mirror.com
-    private val HOSTS = listOf("https://huggingface.co", "https://hf-mirror.com")
+    /** assets 内模型目录（构建期放入，见 app/src/main/assets/models/bge-small-zh/）。 */
+    private const val ASSET_DIR = "models/bge-small-zh"
 
-    /** 远端文件清单：repo 内相对路径 / 字节数 / sha256（下载后强校验）。 */
-    private class RemoteFile(val remotePath: String, val localName: String, val size: Long, val sha256: String)
-
-    private val FILES = listOf(
-        RemoteFile("config.json", "config.json", 673L, "05b570bff786faa5c4604152aa16f19f77ed6dfc31e47dd0f3dd987078693ac7"),
-        RemoteFile("tokenizer_config.json", "tokenizer_config.json", 496L, "3f5961b9ac86288cccdb97f32fb848d6187c78e1603958c53f3ea1f296b7d8a2"),
-        RemoteFile("special_tokens_map.json", "special_tokens_map.json", 280L, "06e405a36dfe4b9604f484f6a1e619af1a7f7d09e34a8555eb0b77b66318067f"),
-        RemoteFile("tokenizer.json", "tokenizer.json", 17_082_913L, "b60b6b43406a48bf3638526314f3d232d97058bc93472ff2de930d43686fa441"),
-        // 大文件放最后，保证进度条前段快速走完小文件
-        RemoteFile("onnx/model_quantized.onnx", MODEL_FILE, 118_308_126L, "66fc00f5f29afcaff34092e1bdd20008ca3918265a82fb9695a551e510cc4ebc"),
-    )
-    private val TOTAL_BYTES = FILES.sumOf { it.size }
-
-    // tokenizer.json 已配置 truncation(max_length=128)，Rust 分词器会自动截断；
+    // tokenizer.json 已配置 truncation(max_length=512)，Rust 分词器会自动截断；
     // 这里再做一层字符级截断，避免极端超长文本浪费 token 计算量
     private const val MAX_TEXT_CHARS = 400
-    // 低于该余弦分数视为噪声丢弃；实测校准：真命中 ≥0.44，噪声底 ≤0.33
+    // 低于该余弦分数视为噪声丢弃（bge-small-zh 上重新校准后如需可再调）
     private const val MIN_SCORE = 0.40f
     // 语义补充结果最多返回条数
     private const val MAX_SEMANTIC_HITS = 6
@@ -69,12 +53,10 @@ object SemanticSearchManager {
     sealed interface Status {
         data object Checking : Status
 
-        /** 模型未下载；sizeMb 为预计下载量。 */
-        data class NeedsDownload(val sizeMb: Int) : Status
+        /** 模型拷贝中（assets → filesDir，秒级）。 */
+        data object Preparing : Status
 
-        data class Downloading(val downloadedBytes: Long, val totalBytes: Long) : Status
-
-        /** 下载或初始化失败；保留关键词搜索兜底。 */
+        /** 初始化失败；保留关键词搜索兜底。 */
         data class Failed(val message: String) : Status
 
         /** 引擎就绪；indexing 表示正在重建向量缓存。 */
@@ -97,18 +79,17 @@ object SemanticSearchManager {
 
     fun modelDir(context: Context): File = File(context.filesDir, "embeddings/model")
 
-    /** 启动时调用：模型已存在则直接初始化引擎并载入缓存索引。 */
+    /**
+     * 启动时调用：把内置模型从 assets 拷贝到 filesDir（仅首次或文件不完整时），
+     * 然后初始化引擎并载入缓存索引。全程无网络。
+     */
     fun ensureReady(context: Context) {
         scope.launch {
             engineMutex.withLock {
-                if (_state.value is Status.Ready || _state.value is Status.Downloading) return@withLock
+                if (_state.value is Status.Ready || _state.value is Status.Preparing) return@withLock
                 _state.value = Status.Checking
-                val dir = modelDir(context)
-                if (!FILES.all { isPlausible(File(dir, it.localName)) }) {
-                    _state.value = Status.NeedsDownload(sizeMb = totalSizeMb())
-                    return@withLock
-                }
                 try {
+                    val dir = ensureModelFiles(context)
                     val t0 = android.os.SystemClock.elapsedRealtime()
                     initEngine(dir)
                     loadStoreCache(context)
@@ -125,39 +106,28 @@ object SemanticSearchManager {
         }
     }
 
-    /** 用户点击下载按钮触发；完成后自动初始化。支持断点续传与双源重试。 */
-    fun downloadModel(context: Context) {
-        scope.launch {
-            engineMutex.withLock {
-                if (_state.value is Status.Ready || _state.value is Status.Downloading) return@withLock
-                val dir = modelDir(context)
-                dir.mkdirs()
-                _state.value = Status.Downloading(0, TOTAL_BYTES)
-                try {
-                    var doneBefore = 0L
-                    for (f in FILES) {
-                        downloadTo(dir, f) { done, _ ->
-                            _state.value = Status.Downloading(doneBefore + done, TOTAL_BYTES)
-                        }
-                        doneBefore += f.size
-                        _state.value = Status.Downloading(doneBefore, TOTAL_BYTES)
-                    }
-                    val t0 = android.os.SystemClock.elapsedRealtime()
-                    initEngine(dir)
-                    loadStoreCache(context)
-                    _state.value = Status.Ready(indexing = false)
-                    Log.i(TAG, "model downloaded & engine ready, init=${android.os.SystemClock.elapsedRealtime() - t0} ms")
-                } catch (e: Exception) {
-                    Log.w(TAG, "download/init failed", e)
-                    _state.value = Status.Failed(
-                        when (e) {
-                            is IOException -> "模型下载失败：${e.message}（请检查网络后重试）"
-                            else -> "语义引擎初始化失败：${e.message}"
-                        },
-                    )
-                }
-            }
+    /** assets → filesDir 拷贝（ONNX Runtime 从路径加载最稳）；已完整则跳过。 */
+    private fun ensureModelFiles(context: Context): File {
+        val dir = modelDir(context)
+        dir.mkdirs()
+        copyAssetIfNeeded(context, "$ASSET_DIR/$MODEL_FILE", File(dir, MODEL_FILE))
+        copyAssetIfNeeded(context, "$ASSET_DIR/$TOKENIZER_FILE", File(dir, TOKENIZER_FILE))
+        return dir
+    }
+
+    private fun copyAssetIfNeeded(context: Context, assetPath: String, dest: File) {
+        val expectedSize = context.assets.openFd(assetPath).length
+        if (dest.exists() && dest.length() == expectedSize) return
+        dest.parentFile?.mkdirs()
+        context.assets.open(assetPath).use { input ->
+            dest.outputStream().use { output -> input.copyTo(output) }
         }
+        val actual = dest.length()
+        if (actual != expectedSize) {
+            dest.delete()
+            error("asset copy size mismatch for $assetPath: got $actual, want $expectedSize")
+        }
+        Log.i(TAG, "copied asset $assetPath -> ${dest.absolutePath} ($actual bytes)")
     }
 
     /**
@@ -241,7 +211,7 @@ object SemanticSearchManager {
         val e = SentenceEmbedding()
         e.init(
             modelFilepath = File(dir, MODEL_FILE).absolutePath,
-            tokenizerBytes = File(dir, "tokenizer.json").readBytes(),
+            tokenizerBytes = File(dir, TOKENIZER_FILE).readBytes(),
             useTokenTypeIds = true,
             outputTensorName = "last_hidden_state",
             normalizeEmbeddings = true,
@@ -278,102 +248,5 @@ object SemanticSearchManager {
     private fun sha256Short(text: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
         return digest.take(8).joinToString("") { "%02x".format(it) }
-    }
-
-    private fun sha256Hex(file: File): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { ins ->
-            val buf = ByteArray(1 shl 16)
-            while (true) {
-                val n = ins.read(buf)
-                if (n < 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        return md.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    private fun totalSizeMb(): Int = ((TOTAL_BYTES + (1 shl 20) - 1) / (1 shl 20)).toInt()
-
-    /** 文件存在且大小接近上游（±2%），防半截文件；精确完整性由下载时的 sha256 保证。 */
-    private fun isPlausible(file: File): Boolean {
-        if (!file.exists()) return false
-        val expected = FILES.firstOrNull { it.localName == file.name }?.size ?: return file.length() > 0
-        return kotlin.math.abs(file.length() - expected) <= expected / 50
-    }
-
-    private fun downloadTo(dir: File, f: RemoteFile, onProgress: ((Long, Long) -> Unit)? = null) {
-        val dest = File(dir, f.localName)
-        if (dest.exists() && dest.length() == f.size && sha256Hex(dest) == f.sha256) {
-            onProgress?.invoke(f.size, f.size)
-            return
-        }
-        var lastError: Exception? = null
-        for (host in HOSTS) {
-            try {
-                fetch("$host/$HF_REPO/${f.remotePath}", dir, f, onProgress)
-                return
-            } catch (e: Exception) {
-                Log.w(TAG, "download ${f.localName} from $host failed: ${e.message}")
-                lastError = e
-            }
-        }
-        throw lastError ?: IOException("all mirrors failed")
-    }
-
-    /** HTTP 下载到 .part 临时文件，支持 Range 断点续传；完成后校验大小与 sha256 再原子落盘。 */
-    private fun fetch(url: String, dir: File, f: RemoteFile, onProgress: ((Long, Long) -> Unit)?) {
-        val tmp = File(dir, "${f.localName}.part")
-        val conn = URL(url).openConnection() as HttpURLConnection
-        try {
-            conn.connectTimeout = 10_000
-            conn.readTimeout = 60_000
-            conn.instanceFollowRedirects = true
-            var offset = if (tmp.exists() && tmp.length() < f.size) tmp.length() else 0L
-            if (offset > 0) conn.setRequestProperty("Range", "bytes=$offset-")
-            val code = conn.responseCode
-            when {
-                code == 206 -> Unit // 从断点继续
-                code in 200..299 -> offset = 0 // 服务端不支持 Range，从头下
-                else -> throw IOException("HTTP $code")
-            }
-            if (offset == 0L && tmp.exists()) tmp.delete()
-            val total = offset + (conn.contentLengthLong.takeIf { it > 0 } ?: (f.size - offset))
-            FileOutputStream(tmp, offset > 0).use { out ->
-                conn.inputStream.use { input ->
-                    val buf = ByteArray(64 * 1024)
-                    var copied = offset
-                    var lastReport = copied
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        copied += n
-                        // 每 ~256KB 上报一次进度，避免过度刷新 UI
-                        if (onProgress != null && copied - lastReport >= 256 * 1024) {
-                            lastReport = copied
-                            onProgress(copied, total)
-                        }
-                    }
-                    onProgress?.invoke(copied, total)
-                }
-            }
-            if (tmp.length() != f.size) {
-                throw IOException("size mismatch: got ${tmp.length()}, want ${f.size}")
-            }
-            val actualSha = sha256Hex(tmp)
-            if (actualSha != f.sha256) {
-                tmp.delete()
-                throw IOException("sha256 mismatch for ${f.localName}")
-            }
-            val dest = File(dir, f.localName)
-            if (!tmp.renameTo(dest)) {
-                dest.delete()
-                tmp.copyTo(dest, overwrite = true)
-                tmp.delete()
-            }
-        } finally {
-            conn.disconnect()
-        }
     }
 }

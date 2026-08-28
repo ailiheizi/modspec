@@ -437,7 +437,7 @@ private fun ShortcutsPage(
             )
         }
         item { SemanticStatusBanner(state = semanticState, onAction = {
-            SemanticSearchManager.downloadModel(context)
+            SemanticSearchManager.ensureReady(context)
         }) }
         when {
             loading && toggles.isEmpty() -> {
@@ -492,56 +492,23 @@ private fun ShortcutsPage(
     }
 }
 
-/** 语义搜索状态条：需要下载 / 下载中 / 失败可重试 / 索引更新中；就绪且无索引动作时不占位。 */
+/** 语义搜索状态条：模型准备中 / 失败可重试 / 索引更新中；就绪且无索引动作时不占位。 */
 @Composable
 private fun SemanticStatusBanner(
     state: SemanticSearchManager.Status,
     onAction: () -> Unit,
 ) {
     when (state) {
-        is SemanticSearchManager.Status.NeedsDownload -> {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.AutoAwesome,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "语义搜索需一次性下载模型（约 ${state.sizeMb} MB），之后完全离线可用",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Button(onClick = onAction, modifier = Modifier.fillMaxWidth()) {
-                        Text("下载语义模型")
-                    }
-                }
-            }
-        }
-        is SemanticSearchManager.Status.Downloading -> {
-            val fraction = if (state.totalBytes > 0) {
-                (state.downloadedBytes.toFloat() / state.totalBytes).coerceIn(0f, 1f)
-            } else 0f
-            Column(modifier = Modifier.fillMaxWidth()) {
+        is SemanticSearchManager.Status.Preparing -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 LinearProgressIndicator(
-                    progress = { fraction },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(4.dp),
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "正在下载语义模型 ${state.downloadedBytes / (1 shl 20)} / " +
-                        "${(state.totalBytes + (1 shl 20) - 1) / (1 shl 20)} MB",
+                    text = "正在准备语义模型…",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

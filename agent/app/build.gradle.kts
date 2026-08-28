@@ -16,6 +16,17 @@ android {
         versionName = "0.1.0"
     }
 
+    // 按 ABI 拆分：每个 APK 只含单一架构 native 库，体积最小化
+    // 只面向 Android 真机架构（x86 系仅模拟器需要，不打包）
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -41,6 +52,12 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    androidResources {
+        // 内置语义模型(.onnx/.json)保持未压缩，assets.openFd 可直接访问
+        noCompress += "onnx"
+        noCompress += "json"
     }
 
     packaging {
