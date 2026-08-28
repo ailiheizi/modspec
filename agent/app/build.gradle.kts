@@ -16,13 +16,13 @@ android {
         versionName = "0.1.0"
     }
 
-    // 按 ABI 拆分：每个 APK 只含单一架构 native 库，体积最小化
-    // 只面向 Android 真机架构（x86 系仅模拟器需要，不打包）
+    // 按 ABI 拆分：每个 APK 只含单一架构 native 库，体积最小化。
+    // 保留 Android 常见的四种 ABI，分别发布对应 APK。
     splits {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a")
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
             isUniversalApk = false
         }
     }
